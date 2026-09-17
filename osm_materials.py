@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+TAGINFO_URL = "https://taginfo.geofabrik.de/europe:{name}/api/4/key/stats?key=building"
 USER_AGENT = "osm-materials-research/0.1"
 COUNTRIES = {"SE": "sweden", "NO": "norway", "DK": "denmark"}
 MATERIAL_KEYS = (
@@ -31,12 +32,9 @@ Ring = list[Coord]
 Feature = dict[str, Any]
 
 
-def build_query(iso: str, count_all: bool = False, timeout: int = 900) -> str:
-    area = f"[out:json][timeout:{timeout}];area['ISO3166-1'='{iso}'][admin_level=2]->.a;"
-    if count_all:
-        return area + "nwr[building](area.a);out count;"
+def build_query(iso: str, timeout: int = 900) -> str:
     keys = "|".join(MATERIAL_KEYS)
-    return area + (
+    return f"[out:json][timeout:{timeout}];area['ISO3166-1'='{iso}'][admin_level=2]->.a;" + (
         f"(nwr[building][~'^({keys})$'~'.'](area.a);"
         f"nwr['building:part'][~'^({keys})$'~'.'](area.a););"
         "out body geom;"
@@ -148,15 +146,20 @@ def overpass(query: str, retries: int = 8) -> dict[str, Any]:
     raise RuntimeError("Overpass failed")
 
 
+def total_buildings(name: str) -> int:
+    """All objects with a building tag in the country's Geofabrik extract (cheap, unlike Overpass)."""
+    r = httpx.get(TAGINFO_URL.format(name=name), headers={"User-Agent": USER_AGENT}, timeout=60)
+    r.raise_for_status()
+    return next(d["count"] for d in r.json()["data"] if d["type"] == "all")
+
+
 def load_raw(iso: str, path: Path, refresh: bool) -> dict[str, Any]:
     """Tagged buildings plus the country's total building count, cached on disk."""
     if path.exists() and not refresh:
         return json.loads(path.read_text(encoding="utf-8"))
     raw = {
         "elements": overpass(build_query(iso))["elements"],
-        "total_buildings": int(
-            overpass(build_query(iso, count_all=True))["elements"][0]["tags"]["total"]
-        ),
+        "total_buildings": total_buildings(COUNTRIES[iso]),
     }
     path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
     return raw

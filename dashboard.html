@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Byggnadsmaterial i OSM</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@6.10.0/dist/maplibre-gl.css">
-<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@6.10.0/dist/maplibre-gl.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css">
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
 <!-- Data is loaded as scripts (not fetch) so the page works straight from file:// -->
 <script src="data/materials_sweden.js"></script>
 <script src="data/materials_norway.js"></script>
@@ -16,7 +16,7 @@
   --plane: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
   --grid: #e1e0d9; --border: rgba(11,11,11,.10); --wash: rgba(11,11,11,.05);
   --m-wood: #eda100; --m-brick: #e34948; --m-concrete: #2a78d6; --m-plaster: #e87ba4;
-  --m-metal: #4a3aa7; --m-stone: #1baf7a; --m-roof_tiles: #eb6834; --m-glass: #008300;
+  --m-metal: #4a3aa7; --m-tar_paper: #1baf7a; --m-roof_tiles: #eb6834; --m-glass: #008300;
   --m-other: #b5b3ab; --seq: #2a78d6;
 }
 @media (prefers-color-scheme: dark) {
@@ -25,7 +25,7 @@
     --plane: #0d0d0d; --surface: #1a1a19; --ink: #fff; --ink-2: #c3c2b7; --muted: #898781;
     --grid: #2c2c2a; --border: rgba(255,255,255,.10); --wash: rgba(255,255,255,.06);
     --m-wood: #c98500; --m-brick: #e66767; --m-concrete: #3987e5; --m-plaster: #d55181;
-    --m-metal: #9085e9; --m-stone: #199e70; --m-roof_tiles: #d95926; --m-glass: #008300;
+    --m-metal: #9085e9; --m-tar_paper: #199e70; --m-roof_tiles: #d95926; --m-glass: #008300;
     --m-other: #5d5c57; --seq: #3987e5;
   }
 }
@@ -49,6 +49,7 @@ h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
   padding: 6px 4px; border-radius: 7px; cursor: pointer;
 }
 .seg button:hover { color: var(--ink); }
+.seg button:disabled { opacity: .4; cursor: default; }
 .seg button[aria-pressed="true"] {
   background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 0 0 1px var(--border);
 }
@@ -59,7 +60,7 @@ h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
 .kpi .value { font-size: 24px; font-weight: 600; letter-spacing: -.02em; line-height: 1.2; }
 .kpi .note { color: var(--muted); font-size: 12px; }
 .row {
-  display: grid; grid-template-columns: 112px 1fr 76px; align-items: center; gap: 8px; width: 100%;
+  display: grid; grid-template-columns: 112px 1fr 92px; align-items: center; gap: 8px; width: 100%;
   padding: 3px 4px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit;
   text-align: left;
 }
@@ -162,7 +163,7 @@ const MEASURES = {
 };
 // Colour follows the material, never its rank; everything else folds into "Övriga".
 // The order is the palette's validated slot order (adjacent pairs stay colour-blind safe in stacks).
-const COLORED = ["concrete", "roof_tiles", "stone", "wood", "plaster", "glass", "metal", "brick"];
+const COLORED = ["concrete", "roof_tiles", "tar_paper", "wood", "plaster", "glass", "metal", "brick"];
 const SV = {
   wood: "Trä", brick: "Tegel", concrete: "Betong", plaster: "Puts", metal: "Metall", stone: "Sten",
   roof_tiles: "Takpannor", glass: "Glas", tar_paper: "Takpapp", steel: "Stål", grass: "Gräs/torv",
@@ -170,7 +171,7 @@ const SV = {
   reinforced_concrete: "Armerad betong", sandstone: "Sandsten", limestone: "Kalksten",
   thatch: "Halm/vass", eternit: "Eternit", tile: "Tegelpannor", tiles: "Plattor", plastic: "Plast",
   cement_block: "Betongblock", metal_sheet: "Plåt", gravel: "Grus", asphalt: "Asfalt",
-  bitumen: "Bitumen", other: "Övriga", granite: "Granit", sheet_metal: "Plåt", clay_tiles: "Lertegel",
+  bitumen: "Bitumen", other: "Annat (other)", granite: "Granit", sheet_metal: "Plåt", clay_tiles: "Lertegel",
   vinyl: "Vinyl", steel_frame: "Stålstomme", zinc: "Zink", aluminium: "Aluminium", rock: "Berg",
 };
 const TYPES_SV = {
@@ -190,8 +191,10 @@ const css = (name) => getComputedStyle(document.documentElement).getPropertyValu
 const normalize = (v) => v.split(/[;,/]/)[0].trim().toLowerCase().replaceAll(" ", "_");
 const group = (m) => (COLORED.includes(m) ? m : "other");
 const label = (m) => SV[m] ?? m.replaceAll("_", " ");
+const groupLabel = (g) => (g === "other" ? "Övriga" : label(g));
 const nf = new Intl.NumberFormat("sv-SE", { maximumFractionDigits: 0 });
-const compact = new Intl.NumberFormat("sv-SE", { notation: "compact", maximumFractionDigits: 1 });
+const dec = new Intl.NumberFormat("sv-SE", { maximumFractionDigits: 1 });
+const compact = { format: (v) => (v >= 1e6 ? `${dec.format(v / 1e6)} milj.` : nf.format(v)) };
 const pct = (x) => new Intl.NumberFormat("sv-SE", { style: "percent", maximumFractionDigits: x < 0.1 ? 1 : 0 }).format(x);
 const fmt = (v, measure) => (measure === "count" ? nf.format(v) : `${compact.format(v)} m²`);
 
@@ -239,6 +242,7 @@ function segmented(el, options, prop) {
     const b = document.createElement("button");
     b.textContent = text;
     b.setAttribute("aria-pressed", String(state[prop] === id));
+    b.disabled = prop === "country" && !DATA[id];
     b.onclick = () => {
       state[prop] = id;
       if (prop !== "measure") state.material = null;
@@ -313,7 +317,7 @@ function renderCompare() {
       if (!r || r.value / total < 0.002) continue;
       const seg = document.createElement("span");
       seg.style.cssText = `flex:${r.value};background:var(--m-${id})`;
-      attachTip(seg, `<b>${name} · ${label(id)} · ${pct(r.value / total)}</b>${tipRows(r)}`);
+      attachTip(seg, `<b>${name} · ${groupLabel(id)} · ${pct(r.value / total)}</b>${tipRows(r)}`);
       stack.append(seg);
     }
     const lab = document.createElement("span");
@@ -322,7 +326,7 @@ function renderCompare() {
     $("compare").append(lab, stack);
   }
   $("cmpLegend").innerHTML = [...COLORED, "other"]
-    .map((id) => `<span><i class="sw" style="background:var(--m-${id})"></i>${label(id)}</span>`)
+    .map((id) => `<span><i class="sw" style="background:var(--m-${id})"></i>${groupLabel(id)}</span>`)
     .join("");
   $("cmpHint").textContent = `Andel av ${MEASURES[state.measure].label.toLowerCase()} per material · ${KEYS[state.key].toLowerCase()}`;
 }
@@ -393,7 +397,7 @@ function updateMap() {
   );
   $("maplegend").innerHTML = [...COLORED, "other"]
     .filter((id) => present.has(id))
-    .map((id) => `<span><i class="sw" style="background:var(--m-${id})"></i>${label(id)}</span>`)
+    .map((id) => `<span><i class="sw" style="background:var(--m-${id})"></i>${groupLabel(id)}</span>`)
     .join("");
 }
 
