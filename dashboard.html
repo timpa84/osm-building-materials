@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Byggnadsmaterial i OSM</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@6.10.0/dist/maplibre-gl.css">
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@6.10.0/dist/maplibre-gl.js"></script>
+<!-- Data is loaded as scripts (not fetch) so the page works straight from file:// -->
+<script src="data/materials_sweden.js"></script>
+<script src="data/materials_norway.js"></script>
+<script src="data/materials_denmark.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --plane: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --border: rgba(11,11,11,.10); --wash: rgba(11,11,11,.05);
+  --m-wood: #eda100; --m-brick: #e34948; --m-concrete: #2a78d6; --m-plaster: #e87ba4;
+  --m-metal: #4a3aa7; --m-stone: #1baf7a; --m-roof_tiles: #eb6834; --m-glass: #008300;
+  --m-other: #b5b3ab; --seq: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --plane: #0d0d0d; --surface: #1a1a19; --ink: #fff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --border: rgba(255,255,255,.10); --wash: rgba(255,255,255,.06);
+    --m-wood: #c98500; --m-brick: #e66767; --m-concrete: #3987e5; --m-plaster: #d55181;
+    --m-metal: #9085e9; --m-stone: #199e70; --m-roof_tiles: #d95926; --m-glass: #008300;
+    --m-other: #5d5c57; --seq: #3987e5;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: grid; grid-template-columns: 440px 1fr; background: var(--plane); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+#side { overflow-y: auto; padding: 20px 16px 32px; display: flex; flex-direction: column; gap: 12px; }
+#map { height: 100vh; }
+h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
+.sub { color: var(--ink-2); margin: 2px 0 0; font-size: 13px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.card h2 { font-size: 13px; font-weight: 600; margin: 0 0 2px; }
+.card .hint { color: var(--muted); font-size: 12px; margin: 0 0 10px; }
+.controls { display: grid; gap: 8px; }
+.seg { display: flex; background: var(--wash); border-radius: 9px; padding: 3px; gap: 2px; }
+.seg button {
+  flex: 1; border: 0; background: none; color: var(--ink-2); font: inherit; font-size: 13px;
+  padding: 6px 4px; border-radius: 7px; cursor: pointer;
+}
+.seg button:hover { color: var(--ink); }
+.seg button[aria-pressed="true"] {
+  background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 0 0 1px var(--border);
+}
+.seg button:focus-visible, .row:focus-visible { outline: 2px solid var(--seq); outline-offset: 1px; }
+.kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+.kpi .label { color: var(--ink-2); font-size: 12px; }
+.kpi .value { font-size: 24px; font-weight: 600; letter-spacing: -.02em; line-height: 1.2; }
+.kpi .note { color: var(--muted); font-size: 12px; }
+.row {
+  display: grid; grid-template-columns: 112px 1fr 76px; align-items: center; gap: 8px; width: 100%;
+  padding: 3px 4px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit;
+  text-align: left;
+}
+button.row { cursor: pointer; }
+button.row:hover { background: var(--wash); }
+.row.dim { opacity: .35; }
+.row .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.row .track { height: 10px; }
+.row .bar { display: block; height: 100%; min-width: 2px; border-radius: 0 4px 4px 0; background: var(--seq); }
+.row .num { text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; color: var(--ink-2); }
+.stack { display: flex; height: 16px; gap: 2px; }
+.stack span { min-width: 0; }
+.stack span:first-child { border-radius: 4px 0 0 4px; }
+.stack span:last-child { border-radius: 0 4px 4px 0; }
+.cmp { display: grid; grid-template-columns: 70px 1fr; gap: 8px 8px; align-items: center; font-size: 13px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 10px; font-size: 12px; color: var(--ink-2); }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.reset { border: 0; background: none; color: var(--seq); font: inherit; font-size: 12px; cursor: pointer; padding: 0; float: right; }
+footer { color: var(--muted); font-size: 12px; }
+footer a, .maplibregl-popup a { color: var(--seq); }
+#tip {
+  position: fixed; z-index: 10; pointer-events: none; display: none; max-width: 260px;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.18);
+}
+#tip b { display: block; font-size: 13px; margin-bottom: 2px; }
+#tip div, .pop div { display: flex; justify-content: space-between; gap: 16px; color: var(--ink-2); }
+#tip div span:last-child, .pop div span:last-child { color: var(--ink); font-variant-numeric: tabular-nums; text-align: right; }
+.maplibregl-popup-content {
+  background: var(--surface); color: var(--ink); border-radius: 10px; padding: 12px 14px;
+  font: 12px/1.5 system-ui, sans-serif; min-width: 210px;
+}
+.maplibregl-popup-tip { display: none; }
+.pop b { font-size: 13px; display: block; margin-bottom: 4px; }
+#maplegend {
+  position: absolute; right: 12px; bottom: 28px; z-index: 2; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; font-size: 12px;
+  display: grid; gap: 2px; color: var(--ink-2);
+}
+#mapwrap { position: relative; }
+#missing { padding: 40px; }
+@media (max-width: 860px) {
+  body { grid-template-columns: 1fr; grid-template-rows: auto 70vh; }
+  #side { overflow: visible; }
+  #map { height: 70vh; }
+}
+</style>
+</head>
+<body>
+<aside id="side">
+  <header>
+    <h1>Byggnadsmaterial i OpenStreetMap</h1>
+    <p class="sub">Byggnader med materialtaggar i Sverige, Norge och Danmark</p>
+  </header>
+  <div class="controls">
+    <div class="seg" id="country" role="group" aria-label="Land"></div>
+    <div class="seg" id="key" role="group" aria-label="Materialtagg"></div>
+    <div class="seg" id="measure" role="group" aria-label="Mått"></div>
+  </div>
+  <div class="kpis" id="kpis"></div>
+  <section class="card">
+    <button class="reset" id="reset" hidden>Rensa filter</button>
+    <h2 id="matTitle"></h2>
+    <p class="hint">Klicka på ett material för att filtrera kartan.</p>
+    <div id="materials"></div>
+  </section>
+  <section class="card">
+    <h2>Byggnadstyp</h2>
+    <p class="hint" id="typeHint"></p>
+    <div id="types"></div>
+  </section>
+  <section class="card">
+    <h2>Jämförelse mellan länderna</h2>
+    <p class="hint" id="cmpHint"></p>
+    <div class="cmp" id="compare"></div>
+    <div class="legend" id="cmpLegend"></div>
+  </section>
+  <footer>
+    Våningsarea = byggnadsarea × antal våningar (<code>building:levels</code>); saknas uppgiften antas
+    2 våningar. Data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-bidragsgivare
+    via Overpass API. Taggningen är ofullständig – siffrorna visar vad som är kartlagt, inte hela beståndet.
+  </footer>
+</aside>
+<div id="mapwrap"><div id="map"></div><div id="maplegend"></div></div>
+<div id="tip"></div>
+
+<script>
+"use strict";
+const COUNTRIES = { sweden: "Sverige", norway: "Norge", denmark: "Danmark" };
+const KEYS = {
+  "building:material": "Fasad",
+  "roof:material": "Tak",
+  "building:structure": "Stomme",
+  "building:facade:material": "Fasad (detalj)",
+};
+const MEASURES = {
+  count: { label: "Antal", unit: "byggnader", get: () => 1 },
+  footprint: { label: "Byggnadsarea", unit: "m²", get: (p) => p.footprint_m2 },
+  floor: { label: "Våningsarea", unit: "m²", get: (p) => p.floor_area_m2 },
+};
+// Colour follows the material, never its rank; everything else folds into "Övriga".
+// The order is the palette's validated slot order (adjacent pairs stay colour-blind safe in stacks).
+const COLORED = ["concrete", "roof_tiles", "stone", "wood", "plaster", "glass", "metal", "brick"];
+const SV = {
+  wood: "Trä", brick: "Tegel", concrete: "Betong", plaster: "Puts", metal: "Metall", stone: "Sten",
+  roof_tiles: "Takpannor", glass: "Glas", tar_paper: "Takpapp", steel: "Stål", grass: "Gräs/torv",
+  slate: "Skiffer", copper: "Koppar", masonry: "Murverk", timber_framing: "Korsvirke",
+  reinforced_concrete: "Armerad betong", sandstone: "Sandsten", limestone: "Kalksten",
+  thatch: "Halm/vass", eternit: "Eternit", tile: "Tegelpannor", tiles: "Plattor", plastic: "Plast",
+  cement_block: "Betongblock", metal_sheet: "Plåt", gravel: "Grus", asphalt: "Asfalt",
+  bitumen: "Bitumen", other: "Övriga", granite: "Granit", sheet_metal: "Plåt", clay_tiles: "Lertegel",
+  vinyl: "Vinyl", steel_frame: "Stålstomme", zinc: "Zink", aluminium: "Aluminium", rock: "Berg",
+};
+const TYPES_SV = {
+  yes: "Ospecificerad", house: "Villa", apartments: "Flerbostadshus", detached: "Friliggande hus",
+  residential: "Bostadshus", terrace: "Radhus", shed: "Bod", garage: "Garage", garages: "Garagelänga",
+  allotment_house: "Kolonistuga", church: "Kyrka", school: "Skola", industrial: "Industri",
+  commercial: "Kommersiell", retail: "Handel", office: "Kontor", cabin: "Stuga", farm: "Gård",
+  farm_auxiliary: "Ekonomibyggnad", barn: "Lada", roof: "Tak", hut: "Koja", public: "Offentlig",
+  semidetached_house: "Parhus", service: "Teknikbyggnad", warehouse: "Lager", hospital: "Sjukhus",
+  university: "Universitet", kindergarten: "Förskola", civic: "Samhällsbyggnad", hotel: "Hotell",
+  bungalow: "Enplanshus", boathouse: "Båthus", greenhouse: "Växthus", part: "Byggnadsdel",
+};
+
+const state = { country: "sweden", key: "building:material", measure: "floor", material: null };
+const $ = (id) => document.getElementById(id);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const normalize = (v) => v.split(/[;,/]/)[0].trim().toLowerCase().replaceAll(" ", "_");
+const group = (m) => (COLORED.includes(m) ? m : "other");
+const label = (m) => SV[m] ?? m.replaceAll("_", " ");
+const nf = new Intl.NumberFormat("sv-SE", { maximumFractionDigits: 0 });
+const compact = new Intl.NumberFormat("sv-SE", { notation: "compact", maximumFractionDigits: 1 });
+const pct = (x) => new Intl.NumberFormat("sv-SE", { style: "percent", maximumFractionDigits: x < 0.1 ? 1 : 0 }).format(x);
+const fmt = (v, measure) => (measure === "count" ? nf.format(v) : `${compact.format(v)} m²`);
+
+// ---- data -------------------------------------------------------------------------------------
+const DATA = window.OSM_MATERIALS ?? {};
+for (const [country, fc] of Object.entries(DATA)) {
+  for (const f of fc.features) {
+    const p = f.properties;
+    p.country = country;
+    p.type = p.building && p.building !== "no" ? p.building : "part";
+    for (const key of Object.keys(KEYS)) if (p[key]) p[`n:${key}`] = normalize(p[key]);
+  }
+}
+
+/** Sum of the current measure per category, largest first. */
+function tally(features, category) {
+  const get = MEASURES[state.measure].get;
+  const sums = new Map();
+  for (const { properties: p } of features) {
+    const c = category(p);
+    if (c === undefined) continue;
+    const row = sums.get(c) ?? sums.set(c, { id: c, value: 0, count: 0, footprint: 0, floor: 0 }).get(c);
+    row.value += get(p);
+    row.count += 1;
+    row.footprint += p.footprint_m2;
+    row.floor += p.floor_area_m2;
+  }
+  return [...sums.values()].sort((a, b) => b.value - a.value);
+}
+
+/** Top n rows, the rest folded into one "Övriga" row. */
+function topN(rows, n) {
+  if (rows.length <= n + 1) return rows;
+  const rest = rows.slice(n).reduce(
+    (acc, r) => ({ ...acc, value: acc.value + r.value, count: acc.count + r.count, footprint: acc.footprint + r.footprint, floor: acc.floor + r.floor }),
+    { id: "__rest", value: 0, count: 0, footprint: 0, floor: 0, n: rows.length - n },
+  );
+  return [...rows.slice(0, n), rest];
+}
+
+// ---- rendering --------------------------------------------------------------------------------
+function segmented(el, options, prop) {
+  el.innerHTML = "";
+  for (const [id, text] of Object.entries(options)) {
+    const b = document.createElement("button");
+    b.textContent = text;
+    b.setAttribute("aria-pressed", String(state[prop] === id));
+    b.onclick = () => {
+      state[prop] = id;
+      if (prop !== "measure") state.material = null;
+      render();
+      if (prop === "country") fitCountry();
+    };
+    el.append(b);
+  }
+}
+
+function tipRows(r) {
+  return `<div><span>Byggnader</span><span>${nf.format(r.count)}</span></div>
+    <div><span>Byggnadsarea</span><span>${nf.format(r.footprint)} m²</span></div>
+    <div><span>Våningsarea</span><span>${nf.format(r.floor)} m²</span></div>`;
+}
+
+function attachTip(el, html) {
+  el.onmousemove = (e) => {
+    const tip = $("tip");
+    tip.innerHTML = html;
+    tip.style.display = "block";
+    tip.style.left = `${Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8)}px`;
+    tip.style.top = `${Math.min(e.clientY + 14, innerHeight - tip.offsetHeight - 8)}px`;
+  };
+  el.onmouseleave = () => ($("tip").style.display = "none");
+}
+
+function bars(el, rows, { name, color, onClick, selected }) {
+  el.innerHTML = "";
+  const max = Math.max(...rows.map((r) => r.value), 1);
+  const total = rows.reduce((s, r) => s + r.value, 0) || 1;
+  for (const r of rows) {
+    const rest = r.id === "__rest";
+    const row = document.createElement(onClick && !rest ? "button" : "div");
+    row.className = "row" + (selected && selected !== r.id ? " dim" : "");
+    const text = rest ? `Övriga (${r.n})` : name(r.id);
+    row.innerHTML = `<span class="name">${text}</span>
+      <span class="track"><span class="bar" style="width:${(r.value / max) * 100}%;background:${rest ? "var(--m-other)" : color(r.id)}"></span></span>
+      <span class="num">${fmt(r.value, state.measure)}</span>`;
+    if (onClick && !rest) row.onclick = () => onClick(r.id);
+    attachTip(row, `<b>${text} · ${pct(r.value / total)}</b>${tipRows(r)}`);
+    el.append(row);
+  }
+  if (!rows.length) el.innerHTML = `<p class="hint">Inga byggnader med den här taggen.</p>`;
+}
+
+function renderKpis(features, tagged) {
+  const fc = DATA[state.country];
+  const sum = (list, get) => list.reduce((s, f) => s + get(f.properties), 0);
+  const assumed = tagged.filter((f) => f.properties.levels_assumed).length;
+  const tiles = [
+    ["Byggnader med materialtagg", nf.format(features.length), `${pct(features.length / fc.total_buildings)} av ${compact.format(fc.total_buildings)} byggnader i OSM`],
+    [`Med taggen ${KEYS[state.key].toLowerCase()}`, nf.format(tagged.length), state.key],
+    ["Byggnadsarea", `${compact.format(sum(tagged, (p) => p.footprint_m2))} m²`, "fotavtryck på marken"],
+    ["Våningsarea", `${compact.format(sum(tagged, (p) => p.floor_area_m2))} m²`, tagged.length ? `${pct(assumed / tagged.length)} med antagna 2 våningar` : ""],
+  ];
+  $("kpis").innerHTML = tiles
+    .map(([l, v, n]) => `<div class="kpi"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`)
+    .join("");
+}
+
+function renderCompare() {
+  const nkey = `n:${state.key}`;
+  $("compare").innerHTML = "";
+  for (const [country, name] of Object.entries(COUNTRIES)) {
+    const rows = tally(DATA[country]?.features ?? [], (p) => (p[nkey] ? group(p[nkey]) : undefined));
+    const total = rows.reduce((s, r) => s + r.value, 0);
+    const stack = document.createElement("div");
+    stack.className = "stack";
+    for (const id of [...COLORED, "other"]) {
+      const r = rows.find((x) => x.id === id);
+      if (!r || r.value / total < 0.002) continue;
+      const seg = document.createElement("span");
+      seg.style.cssText = `flex:${r.value};background:var(--m-${id})`;
+      attachTip(seg, `<b>${name} · ${label(id)} · ${pct(r.value / total)}</b>${tipRows(r)}`);
+      stack.append(seg);
+    }
+    const lab = document.createElement("span");
+    lab.textContent = name;
+    lab.style.fontWeight = country === state.country ? 600 : 400;
+    $("compare").append(lab, stack);
+  }
+  $("cmpLegend").innerHTML = [...COLORED, "other"]
+    .map((id) => `<span><i class="sw" style="background:var(--m-${id})"></i>${label(id)}</span>`)
+    .join("");
+  $("cmpHint").textContent = `Andel av ${MEASURES[state.measure].label.toLowerCase()} per material · ${KEYS[state.key].toLowerCase()}`;
+}
+
+function render() {
+  segmented($("country"), COUNTRIES, "country");
+  segmented($("key"), KEYS, "key");
+  segmented($("measure"), Object.fromEntries(Object.entries(MEASURES).map(([k, m]) => [k, m.label])), "measure");
+
+  const nkey = `n:${state.key}`;
+  const features = DATA[state.country]?.features ?? [];
+  const tagged = features.filter((f) => f.properties[nkey]);
+  renderKpis(features, tagged);
+
+  $("matTitle").textContent = `${KEYS[state.key]}material · ${MEASURES[state.measure].label.toLowerCase()}`;
+  bars($("materials"), topN(tally(tagged, (p) => p[nkey]), 10), {
+    name: label,
+    color: (id) => `var(--m-${group(id)})`,
+    selected: state.material,
+    onClick: (id) => {
+      state.material = state.material === id ? null : id;
+      render();
+    },
+  });
+  $("reset").hidden = !state.material;
+
+  const inFilter = state.material ? tagged.filter((f) => f.properties[nkey] === state.material) : tagged;
+  $("typeHint").textContent = state.material ? `Byggnader med ${label(state.material).toLowerCase()}` : "Alla material";
+  bars($("types"), topN(tally(inFilter, (p) => p.type), 8), {
+    name: (t) => TYPES_SV[t] ?? t.replaceAll("_", " "),
+    color: () => "var(--seq)",
+  });
+  renderCompare();
+  updateMap();
+}
+$("reset").onclick = () => {
+  state.material = null;
+  render();
+};
+
+// ---- map --------------------------------------------------------------------------------------
+const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+let map = null;
+let mapReady = false;
+
+function centroid(geom) {
+  if (geom.type === "Point") return geom.coordinates;
+  const ring = geom.type === "Polygon" ? geom.coordinates[0] : geom.coordinates[0][0];
+  const n = ring.length - 1;
+  return [0, 1].map((i) => ring.slice(0, n).reduce((s, c) => s + c[i], 0) / n);
+}
+
+function colorExpr() {
+  const expr = ["match", ["get", `n:${state.key}`]];
+  for (const id of COLORED) expr.push(id, css(`--m-${id}`));
+  return [...expr, css("--m-other")];
+}
+
+function updateMap() {
+  if (!mapReady) return;
+  const nkey = `n:${state.key}`;
+  const filter = state.material ? ["==", ["get", nkey], state.material] : ["has", nkey];
+  for (const layer of ["dots", "fill", "outline"]) map.setFilter(layer, filter);
+  map.setPaintProperty("dots", "circle-color", colorExpr());
+  map.setPaintProperty("fill", "fill-color", colorExpr());
+  const present = new Set(
+    (DATA[state.country]?.features ?? []).map((f) => f.properties[nkey]).filter(Boolean).map(group),
+  );
+  $("maplegend").innerHTML = [...COLORED, "other"]
+    .filter((id) => present.has(id))
+    .map((id) => `<span><i class="sw" style="background:var(--m-${id})"></i>${label(id)}</span>`)
+    .join("");
+}
+
+function fitCountry() {
+  const features = DATA[state.country]?.features ?? [];
+  if (!map || !features.length) return;
+  const b = new maplibregl.LngLatBounds();
+  for (const f of features) b.extend(centroid(f.geometry));
+  map.fitBounds(b, { padding: 40, duration: 900 });
+}
+
+function popupHtml(p) {
+  const rows = Object.keys(KEYS)
+    .filter((k) => p[k])
+    .map((k) => `<div><span>${KEYS[k]}</span><span>${p[k]}</span></div>`)
+    .join("");
+  return `<div class="pop"><b>${p.name ?? TYPES_SV[p.type] ?? p.type}</b>${rows}
+    <div><span>Våningar</span><span>${p.levels}${p.levels_assumed ? " (antaget)" : ""}</span></div>
+    <div><span>Byggnadsarea</span><span>${nf.format(p.footprint_m2)} m²</span></div>
+    <div><span>Våningsarea</span><span>${nf.format(p.floor_area_m2)} m²</span></div>
+    <a href="https://www.openstreetmap.org/${p.osm_id}" target="_blank" rel="noopener">Visa i OpenStreetMap ↗</a></div>`;
+}
+
+function initMap() {
+  map = new maplibregl.Map({
+    container: "map",
+    style: `https://tiles.openfreemap.org/styles/${dark ? "dark" : "positron"}`,
+    bounds: [4, 54.4, 25, 71.3],
+  });
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+  map.on("load", () => {
+    const all = Object.values(DATA).flatMap((fc) => fc.features);
+    map.addSource("buildings", { type: "geojson", data: { type: "FeatureCollection", features: all } });
+    map.addSource("centroids", {
+      type: "geojson",
+      data: {
+        type: "FeatureCollection",
+        features: all.map((f) => ({ type: "Feature", properties: f.properties, geometry: { type: "Point", coordinates: centroid(f.geometry) } })),
+      },
+    });
+    const surface = css("--surface");
+    map.addLayer({
+      id: "dots", type: "circle", source: "centroids", maxzoom: 14,
+      paint: {
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 1.6, 8, 2.6, 13, 5],
+        "circle-opacity": ["interpolate", ["linear"], ["zoom"], 12.5, 0.85, 14, 0],
+        "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 8, 0, 11, 1],
+        "circle-stroke-color": surface,
+        "circle-stroke-opacity": ["interpolate", ["linear"], ["zoom"], 12.5, 1, 14, 0],
+      },
+    });
+    map.addLayer({ id: "fill", type: "fill", source: "buildings", minzoom: 12, filter: ["!=", ["geometry-type"], "Point"], paint: { "fill-opacity": 0.85 } });
+    map.addLayer({ id: "outline", type: "line", source: "buildings", minzoom: 12, paint: { "line-color": surface, "line-width": 1 } });
+    for (const layer of ["dots", "fill"]) {
+      map.on("click", layer, (e) => new maplibregl.Popup({ maxWidth: "280px" }).setLngLat(e.lngLat).setHTML(popupHtml(e.features[0].properties)).addTo(map));
+      map.on("mouseenter", layer, () => (map.getCanvas().style.cursor = "pointer"));
+      map.on("mouseleave", layer, () => (map.getCanvas().style.cursor = ""));
+    }
+    mapReady = true;
+    updateMap();
+    fitCountry();
+  });
+}
+
+if (!Object.keys(DATA).length) {
+  $("side").innerHTML = `<div id="missing"><h1>Ingen data hittades</h1><p class="sub">Kör <code>uv run python osm_materials.py</code> för att skapa <code>data/materials_*.js</code> och ladda om sidan.</p></div>`;
+} else {
+  if (!DATA[state.country]) state.country = Object.keys(DATA)[0];
+  render();
+  if (window.maplibregl) initMap();
+  else $("map").innerHTML = `<p style="padding:24px">Kartan kräver internetanslutning (MapLibre laddas från CDN).</p>`;
+}
+</script>
+</body>
+</html>

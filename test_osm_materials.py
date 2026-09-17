@@ -1,57 +1,119 @@
-from osm_materials import feature_type, summarize, to_feature
+import pytest
+
+from osm_materials import (
+    geometry,
+    normalize,
+    parse_levels,
+    ring_area_m2,
+    stitch_rings,
+    summarize,
+    to_feature,
+)
+
+# ~100 m x 100 m square at the equator (0.0009 deg = 100.08 m).
+D = 0.0009
+SQUARE = [(0.0, 0.0), (D, 0.0), (D, D), (0.0, D), (0.0, 0.0)]
 
 
-def test_node_feature_keeps_material_and_feature_tags() -> None:
-    element = {
-        "type": "node",
-        "id": 1,
-        "lat": 59.3,
-        "lon": 18.1,
-        "tags": {"power": "pole", "material": "wood", "ref": "12", "name": "P12"},
-    }
-    f = to_feature(element)
-    assert f is not None
-    assert f["geometry"]["coordinates"] == [18.1, 59.3]
-    assert f["properties"] == {
-        "power": "pole",
-        "material": "wood",
-        "name": "P12",
-        "feature": "power=pole",
-        "osm_url": "https://www.openstreetmap.org/node/1",
-    }
+def overpass_geom(ring: list[tuple[float, float]]) -> list[dict[str, float]]:
+    return [{"lon": lon, "lat": lat} for lon, lat in ring]
 
 
-def test_way_uses_center_and_prefixed_material_keys() -> None:
+def test_ring_area_of_square() -> None:
+    assert ring_area_m2(SQUARE) == pytest.approx(100.08**2, rel=1e-3)
+
+
+def test_ring_area_shrinks_with_latitude() -> None:
+    at_60 = [(lon, lat + 60) for lon, lat in SQUARE]
+    assert ring_area_m2(at_60) == pytest.approx(ring_area_m2(SQUARE) / 2, rel=1e-3)
+
+
+def test_stitch_joins_reversed_segments_and_drops_open_ones() -> None:
+    a, b, c, d = SQUARE[:4]
+    assert stitch_rings([[a, b, c], [a, d, c]]) == [[a, d, c, b, a]]
+    assert stitch_rings([[a, b, c]]) == []
+
+
+def test_way_becomes_polygon_with_areas() -> None:
     element = {
         "type": "way",
-        "id": 2,
-        "center": {"lat": 55.0, "lon": 12.0},
-        "tags": {"building": "yes", "roof:material": "tile", "materials": "x"},
+        "id": 7,
+        "geometry": overpass_geom(SQUARE),
+        "tags": {
+            "building": "house",
+            "building:material": "wood",
+            "building:levels": "3",
+            "x": "y",
+        },
     }
     f = to_feature(element)
     assert f is not None
-    assert f["geometry"]["coordinates"] == [12.0, 55.0]
-    assert f["properties"]["roof:material"] == "tile"
-    assert "materials" not in f["properties"]
+    assert f["geometry"]["type"] == "Polygon"
+    props = f["properties"]
+    assert props["osm_id"] == "way/7"
+    assert "x" not in props
+    assert props["footprint_m2"] == pytest.approx(10016, abs=5)
+    assert props["levels"] == 3
+    assert props["levels_assumed"] is False
+    assert props["floor_area_m2"] == pytest.approx(3 * props["footprint_m2"], abs=0.2)
 
 
-def test_way_without_center_is_skipped() -> None:
-    assert to_feature({"type": "way", "id": 3, "tags": {"material": "steel"}}) is None
+def test_missing_levels_default_to_two() -> None:
+    f = to_feature({"type": "way", "id": 8, "geometry": overpass_geom(SQUARE), "tags": {}})
+    assert f is not None
+    props = f["properties"]
+    assert props["levels"] == 2
+    assert props["levels_assumed"] is True
+    assert props["floor_area_m2"] == pytest.approx(2 * props["footprint_m2"], abs=0.2)
 
 
-def test_feature_type_priority_and_fallback() -> None:
-    assert feature_type({"highway": "footway", "bridge": "yes"}) == "bridge=yes"
-    assert feature_type({"bridge": "no", "highway": "path"}) == "highway=path"
-    assert feature_type({"material": "wood"}) == "other"
+def test_relation_subtracts_inner_ring() -> None:
+    hole = [(D / 4, D / 4), (D / 2, D / 4), (D / 2, D / 2), (D / 4, D / 2), (D / 4, D / 4)]
+    element = {
+        "type": "relation",
+        "id": 1,
+        "members": [
+            {"type": "way", "role": "outer", "geometry": overpass_geom(SQUARE[:3])},
+            {"type": "way", "role": "outer", "geometry": overpass_geom(SQUARE[2:])},
+            {"type": "way", "role": "inner", "geometry": overpass_geom(hole)},
+            {"type": "node", "role": "entrance"},
+        ],
+    }
+    result = geometry(element)
+    assert result is not None
+    geom, area = result
+    assert geom["type"] == "Polygon"
+    assert len(geom["coordinates"]) == 2
+    assert area == pytest.approx(ring_area_m2(SQUARE) * 15 / 16, rel=1e-3)
 
 
-def test_summarize_counts_per_feature_key_value() -> None:
+def test_node_has_no_area_and_unclosed_way_is_skipped() -> None:
+    f = to_feature({"type": "node", "id": 1, "lon": 1.0, "lat": 2.0, "tags": {"building": "yes"}})
+    assert f is not None
+    assert f["properties"]["footprint_m2"] == 0
+    assert f["properties"]["floor_area_m2"] == 0
+    assert to_feature({"type": "way", "id": 2, "geometry": overpass_geom(SQUARE[:3])}) is None
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"), [("2", 2.0), ("2.5", 2.5), (None, None), ("2;3", None), ("0", None)]
+)
+def test_parse_levels(value: str | None, expected: float | None) -> None:
+    assert parse_levels(value) == expected
+
+
+def test_normalize() -> None:
+    assert normalize("Wood; metal") == "wood"
+    assert normalize("metal sheet") == "metal_sheet"
+
+
+def test_summarize_sums_areas_per_key_and_material() -> None:
     features = [
-        {"properties": {"feature": "power=pole", "material": "wood"}},
-        {"properties": {"feature": "power=pole", "material": "wood"}},
-        {"properties": {"feature": "building=yes", "roof:material": "tile"}},
+        {"properties": {"building:material": "wood", "footprint_m2": 100, "floor_area_m2": 200}},
+        {"properties": {"building:material": "Wood", "footprint_m2": 50, "floor_area_m2": 100}},
+        {"properties": {"roof:material": "metal", "footprint_m2": 500, "floor_area_m2": 500}},
     ]
     assert summarize(features) == [
-        ("power=pole", "material", "wood", 2),
-        ("building=yes", "roof:material", "tile", 1),
+        ("roof:material", "metal", 1, 500, 500),
+        ("building:material", "wood", 2, 150, 300),
     ]
