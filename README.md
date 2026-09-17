@@ -1,4 +1,4 @@
-# OSM building materials – Sweden, Norway, Denmark
+# OSM building materials – Sweden, Norway, Denmark, France
 
 Finds every OpenStreetMap building (`building=*` or `building:part=*`) that has a
 material tag – `building:material`, `building:facade:material`,
@@ -9,7 +9,7 @@ plus a MapLibre dashboard with statistics.
 
 ```bash
 uv sync
-uv run python osm_materials.py            # all three countries
+uv run python osm_materials.py            # all four countries
 uv run python osm_materials.py SE         # just Sweden
 uv run python osm_materials.py --refresh  # refetch instead of using data/raw_*.json
 ```
@@ -34,6 +34,8 @@ raw response is cached in `data/raw_<country>.json`.
 
 ## Caveats
 
+- France is metropolitan France only (~140k tagged buildings, 64 MB GeoJSON – the dashboard
+  takes a few seconds longer to load).
 - Material tagging is sparse and unevenly mapped; numbers describe what is mapped,
   not the building stock.
 - A `building:part` inside a tagged `building` counts twice in area sums.

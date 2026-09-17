@@ -1,6 +1,7 @@
 import pytest
 
 from osm_materials import (
+    build_query,
     geometry,
     normalize,
     parse_levels,
@@ -117,3 +118,8 @@ def test_summarize_sums_areas_per_key_and_material() -> None:
         ("roof:material", "metal", 1, 500, 500),
         ("building:material", "wood", 2, 150, 300),
     ]
+
+
+def test_build_query_area_selection() -> None:
+    assert "area['ISO3166-1'='SE'][admin_level=2]->.a;" in build_query("SE")
+    assert "area(3601403916)->.a;" in build_query("FR")

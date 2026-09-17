@@ -10,6 +10,7 @@
 <script src="data/materials_sweden.js"></script>
 <script src="data/materials_norway.js"></script>
 <script src="data/materials_denmark.js"></script>
+<script src="data/materials_france.js"></script>
 <style>
 :root {
   color-scheme: light;
@@ -113,7 +114,7 @@ footer a, .maplibregl-popup a { color: var(--seq); }
 <aside id="side">
   <header>
     <h1>Byggnadsmaterial i OpenStreetMap</h1>
-    <p class="sub">Byggnader med materialtaggar i Sverige, Norge och Danmark</p>
+    <p class="sub">Byggnader med materialtaggar i Sverige, Norge, Danmark och Frankrike</p>
   </header>
   <div class="controls">
     <div class="seg" id="country" role="group" aria-label="Land"></div>
@@ -149,7 +150,7 @@ footer a, .maplibregl-popup a { color: var(--seq); }
 
 <script>
 "use strict";
-const COUNTRIES = { sweden: "Sverige", norway: "Norge", denmark: "Danmark" };
+const COUNTRIES = { sweden: "Sverige", norway: "Norge", denmark: "Danmark", france: "Frankrike" };
 const KEYS = {
   "building:material": "Fasad",
   "roof:material": "Tak",
@@ -425,10 +426,10 @@ function initMap() {
   map = new maplibregl.Map({
     container: "map",
     style: `https://tiles.openfreemap.org/styles/${dark ? "dark" : "positron"}`,
-    bounds: [4, 54.4, 25, 71.3],
+    bounds: [-5, 42, 25, 71.3],
   });
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-  map.on("load", () => {
+  map.once("style.load", () => {
     const all = Object.values(DATA).flatMap((fc) => fc.features);
     map.addSource("buildings", { type: "geojson", data: { type: "FeatureCollection", features: all } });
     map.addSource("centroids", {

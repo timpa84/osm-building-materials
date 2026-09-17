@@ -16,7 +16,10 @@ import httpx
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 TAGINFO_URL = "https://taginfo.geofabrik.de/europe:{name}/api/4/key/stats?key=building"
 USER_AGENT = "osm-materials-research/0.1"
-COUNTRIES = {"SE": "sweden", "NO": "norway", "DK": "denmark"}
+COUNTRIES = {"SE": "sweden", "NO": "norway", "DK": "denmark", "FR": "france"}
+# Metropolitan France (relation 1403916): the ISO area also spans the overseas territories,
+# which the Geofabrik extract behind total_buildings() does not.
+AREA_OVERRIDES = {"FR": "area(3601403916)"}
 MATERIAL_KEYS = (
     "building:material",
     "building:facade:material",
@@ -34,7 +37,8 @@ Feature = dict[str, Any]
 
 def build_query(iso: str, timeout: int = 900) -> str:
     keys = "|".join(MATERIAL_KEYS)
-    return f"[out:json][timeout:{timeout}];area['ISO3166-1'='{iso}'][admin_level=2]->.a;" + (
+    area = AREA_OVERRIDES.get(iso, f"area['ISO3166-1'='{iso}'][admin_level=2]")
+    return f"[out:json][timeout:{timeout}];{area}->.a;" + (
         f"(nwr[building][~'^({keys})$'~'.'](area.a);"
         f"nwr['building:part'][~'^({keys})$'~'.'](area.a););"
         "out body geom;"
