@@ -158,7 +158,7 @@ const I18N = {
     locale: "sv-SE",
     title: "Byggnadsmaterial i OpenStreetMap",
     subtitle: "Byggnader med materialtaggar i Sverige, Norge, Danmark och Frankrike",
-    countries: { sweden: "Sverige", norway: "Norge", denmark: "Danmark", france: "Frankrike" },
+    countries: { all: "Alla", sweden: "Sverige", norway: "Norge", denmark: "Danmark", france: "Frankrike" },
     keys: { "building:material": "Fasad", "roof:material": "Tak", "building:structure": "Stomme", "building:facade:material": "Fasad (detalj)" },
     measures: { count: "Antal", footprint: "Byggnadsarea", floor: "Våningsarea" },
     groups: { country: "Land", key: "Materialtagg", measure: "Mått" },
@@ -202,7 +202,7 @@ const I18N = {
     locale: "en-GB",
     title: "Building materials in OpenStreetMap",
     subtitle: "Buildings with material tags in Sweden, Norway, Denmark and France",
-    countries: { sweden: "Sweden", norway: "Norway", denmark: "Denmark", france: "France" },
+    countries: { all: "All", sweden: "Sweden", norway: "Norway", denmark: "Denmark", france: "France" },
     keys: { "building:material": "Facade", "roof:material": "Roof", "building:structure": "Structure", "building:facade:material": "Facade (detail)" },
     measures: { count: "Count", footprint: "Footprint area", floor: "Floor area" },
     groups: { country: "Country", key: "Material tag", measure: "Measure" },
@@ -240,8 +240,8 @@ const COLORED = ["concrete", "roof_tiles", "tar_paper", "wood", "plaster", "glas
 
 const params = new URLSearchParams(location.search);
 const state = {
-  lang: params.get("lang") === "en" || (!params.has("lang") && !navigator.language.startsWith("sv")) ? "en" : "sv",
-  country: "sweden", key: "building:material", measure: "floor", material: null,
+  lang: params.get("lang") === "en" ? "en" : "sv",
+  country: "all", key: "building:material", measure: "floor", material: null,
 };
 let T = I18N[state.lang];
 
@@ -281,6 +281,11 @@ for (const [country, fc] of Object.entries(DATA)) {
     for (const key of Object.keys(I18N.sv.keys)) if (p[key]) p[`n:${key}`] = normalize(p[key]);
   }
 }
+const ALL = Object.values(DATA).flatMap((fc) => fc.features);
+/** Features and OSM building total of the selected country, or of all countries. */
+const selectedFeatures = () => (state.country === "all" ? ALL : DATA[state.country].features);
+const selectedTotal = () =>
+  state.country === "all" ? Object.values(DATA).reduce((s, fc) => s + fc.total_buildings, 0) : DATA[state.country].total_buildings;
 
 /** Sum of the current measure per category, largest first. */
 function tally(features, category) {
@@ -327,7 +332,7 @@ function segmented(el, options, prop, onChange) {
   for (const b of el.children) {
     b.textContent = options[b.dataset.id];
     b.setAttribute("aria-pressed", String(state[prop] === b.dataset.id));
-    b.disabled = prop === "country" && !DATA[b.dataset.id];
+    b.disabled = prop === "country" && b.dataset.id !== "all" && !DATA[b.dataset.id];
   }
 }
 
@@ -368,13 +373,13 @@ function bars(el, rows, { name, color, onClick, selected }) {
 }
 
 function renderKpis(features, tagged) {
-  const fc = DATA[state.country];
+  const total = selectedTotal();
   const sum = (list, get) => list.reduce((s, f) => s + get(f.properties), 0);
   const assumed = tagged.filter((f) => f.properties.levels_assumed).length;
   // total_buildings counts building=* only, so building:part-only objects are reported separately.
   const whole = features.filter((f) => f.properties.type !== "part").length;
   const tiles = [
-    [T.kpiTagged, nf.format(whole), T.kpiOf(pct(whole / fc.total_buildings), compact(fc.total_buildings), nf.format(features.length - whole))],
+    [T.kpiTagged, nf.format(whole), T.kpiOf(pct(whole / total), compact(total), nf.format(features.length - whole))],
     [T.kpiWithKey(T.keys[state.key]), nf.format(tagged.length), state.key],
     [T.kpiFootprint, `${compact(sum(tagged, (p) => p.footprint_m2))} m²`, T.kpiFootprintNote],
     [T.kpiFloor, `${compact(sum(tagged, (p) => p.floor_area_m2))} m²`, tagged.length ? T.kpiAssumed(pct(assumed / tagged.length)) : ""],
@@ -422,7 +427,11 @@ function renderCompare() {
 function render() {
   segmented($("lang"), { sv: "SV", en: "EN" }, "lang", () => {
     setLang(state.lang);
-    history.replaceState(null, "", `?lang=${state.lang}`);
+    try {
+      history.replaceState(null, "", `?lang=${state.lang}`);
+    } catch {
+      // Some browsers refuse to rewrite file:// URLs; the language switch works without it.
+    }
     render();
   });
   const select = () => {
@@ -437,7 +446,7 @@ function render() {
   segmented($("measure"), T.measures, "measure", render);
 
   const nkey = `n:${state.key}`;
-  const features = DATA[state.country]?.features ?? [];
+  const features = selectedFeatures();
   const tagged = features.filter((f) => f.properties[nkey]);
   renderKpis(features, tagged);
 
@@ -485,12 +494,13 @@ function colorExpr() {
 function updateMap() {
   if (!mapReady) return;
   const nkey = `n:${state.key}`;
-  const filter = ["all", ["==", ["get", "country"], state.country], state.material ? ["==", ["get", nkey], state.material] : ["has", nkey]];
+  const filter = ["all", state.material ? ["==", ["get", nkey], state.material] : ["has", nkey]];
+  if (state.country !== "all") filter.push(["==", ["get", "country"], state.country]);
   for (const layer of ["dots", "fill", "outline"]) map.setFilter(layer, filter);
   map.setPaintProperty("dots", "circle-color", colorExpr());
   map.setPaintProperty("fill", "fill-color", colorExpr());
   const present = new Set(
-    (DATA[state.country]?.features ?? []).map((f) => f.properties[nkey]).filter(Boolean).map(group),
+    selectedFeatures().map((f) => f.properties[nkey]).filter(Boolean).map(group),
   );
   $("maplegend").innerHTML = [...COLORED, "other"]
     .filter((id) => present.has(id))
@@ -499,7 +509,7 @@ function updateMap() {
 }
 
 function fitCountry() {
-  const features = DATA[state.country]?.features ?? [];
+  const features = selectedFeatures();
   if (!map || !features.length) return;
   const b = new maplibregl.LngLatBounds();
   for (const f of features) b.extend(centroid(f.geometry));
@@ -529,13 +539,12 @@ function initMap() {
     if (!mapReady) $("maplegend").textContent = `${T.noMap} ${e.error?.message ?? ""}`;
   });
   map.once("style.load", () => {
-    const all = Object.values(DATA).flatMap((fc) => fc.features);
-    map.addSource("buildings", { type: "geojson", data: { type: "FeatureCollection", features: all } });
+    map.addSource("buildings", { type: "geojson", data: { type: "FeatureCollection", features: ALL } });
     map.addSource("centroids", {
       type: "geojson",
       data: {
         type: "FeatureCollection",
-        features: all.map((f) => ({ type: "Feature", properties: f.properties, geometry: { type: "Point", coordinates: centroid(f.geometry) } })),
+        features: ALL.map((f) => ({ type: "Feature", properties: f.properties, geometry: { type: "Point", coordinates: centroid(f.geometry) } })),
       },
     });
     const surface = css("--surface");
@@ -570,7 +579,6 @@ setLang(state.lang);
 if (!Object.keys(DATA).length) {
   $("side").innerHTML = `<div id="missing">${T.noData}</div>`;
 } else {
-  if (!DATA[state.country]) state.country = Object.keys(DATA)[0];
   render();
   if (window.maplibregl) initMap();
   else $("map").innerHTML = `<p style="padding:24px">${T.noMap}</p>`;

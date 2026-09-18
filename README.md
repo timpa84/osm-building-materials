@@ -15,8 +15,8 @@ uv run python osm_materials.py --refresh  # refetch instead of using data/raw_*.
 ```
 
 Then open `dashboard.html` in a browser (double-click – no server needed; it
-needs internet for the base map and MapLibre itself). The UI is in English or
-Swedish: toggle with the SV/EN buttons or open `dashboard.html?lang=en`.
+needs internet for the base map and MapLibre itself). The UI is in Swedish by
+default; switch to English with the SV/EN buttons or `dashboard.html?lang=en`.
 
 Data comes live from the Overpass API, so results reflect OSM at fetch time. The
 raw response is cached in `data/raw_<country>.json`.
