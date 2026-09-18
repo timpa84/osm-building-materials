@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Byggnadsmaterial i OSM</title>
+<title>OSM building materials</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css">
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
 <!-- Data is loaded as scripts (not fetch) so the page works straight from file:// -->
@@ -39,6 +39,9 @@ body {
 #side { overflow-y: auto; padding: 20px 16px 32px; display: flex; flex-direction: column; gap: 12px; }
 #map { height: 100vh; }
 h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
+.titlebar { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.seg.lang { flex: none; padding: 2px; }
+.seg.lang button { flex: none; padding: 3px 10px; font-size: 12px; }
 .sub { color: var(--ink-2); margin: 2px 0 0; font-size: 13px; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
 .card h2 { font-size: 13px; font-weight: 600; margin: 0 0 2px; }
@@ -113,91 +116,160 @@ footer a, .maplibregl-popup a { color: var(--seq); }
 <body>
 <aside id="side">
   <header>
-    <h1>Byggnadsmaterial i OpenStreetMap</h1>
-    <p class="sub">Byggnader med materialtaggar i Sverige, Norge, Danmark och Frankrike</p>
+    <div class="titlebar">
+      <h1 data-t="title"></h1>
+      <div class="seg lang" id="lang" role="group" aria-label="Language"></div>
+    </div>
+    <p class="sub" data-t="subtitle"></p>
   </header>
   <div class="controls">
-    <div class="seg" id="country" role="group" aria-label="Land"></div>
-    <div class="seg" id="key" role="group" aria-label="Materialtagg"></div>
-    <div class="seg" id="measure" role="group" aria-label="Mått"></div>
+    <div class="seg" id="country" role="group"></div>
+    <div class="seg" id="key" role="group"></div>
+    <div class="seg" id="measure" role="group"></div>
   </div>
   <div class="kpis" id="kpis"></div>
   <section class="card">
-    <button class="reset" id="reset" hidden>Rensa filter</button>
+    <button class="reset" id="reset" hidden data-t="reset"></button>
     <h2 id="matTitle"></h2>
-    <p class="hint">Klicka på ett material för att filtrera kartan.</p>
+    <p class="hint" data-t="matHint"></p>
     <div id="materials"></div>
   </section>
   <section class="card">
-    <h2>Byggnadstyp</h2>
+    <h2 data-t="typeTitle"></h2>
     <p class="hint" id="typeHint"></p>
     <div id="types"></div>
   </section>
   <section class="card">
-    <h2>Jämförelse mellan länderna</h2>
+    <h2 data-t="cmpTitle"></h2>
     <p class="hint" id="cmpHint"></p>
     <div class="cmp" id="compare"></div>
     <div class="legend" id="cmpLegend"></div>
   </section>
-  <footer>
-    Våningsarea = byggnadsarea × antal våningar (<code>building:levels</code>); saknas uppgiften antas
-    2 våningar. Data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-bidragsgivare
-    via Overpass API. Taggningen är ofullständig – siffrorna visar vad som är kartlagt, inte hela beståndet.
-  </footer>
+  <footer id="footer"></footer>
 </aside>
 <div id="mapwrap"><div id="map"></div><div id="maplegend"></div></div>
 <div id="tip"></div>
 
 <script>
 "use strict";
-const COUNTRIES = { sweden: "Sverige", norway: "Norge", denmark: "Danmark", france: "Frankrike" };
-const KEYS = {
-  "building:material": "Fasad",
-  "roof:material": "Tak",
-  "building:structure": "Stomme",
-  "building:facade:material": "Fasad (detalj)",
+// ---- text in both languages ---------------------------------------------------------------------
+const I18N = {
+  sv: {
+    locale: "sv-SE",
+    title: "Byggnadsmaterial i OpenStreetMap",
+    subtitle: "Byggnader med materialtaggar i Sverige, Norge, Danmark och Frankrike",
+    countries: { sweden: "Sverige", norway: "Norge", denmark: "Danmark", france: "Frankrike" },
+    keys: { "building:material": "Fasad", "roof:material": "Tak", "building:structure": "Stomme", "building:facade:material": "Fasad (detalj)" },
+    measures: { count: "Antal", footprint: "Byggnadsarea", floor: "Våningsarea" },
+    groups: { country: "Land", key: "Materialtagg", measure: "Mått" },
+    kpiTagged: "Byggnader med materialtagg", kpiOf: (share, total, parts) => `${share} av ${total} byggnader i OSM · +${parts} byggnadsdelar`,
+    kpiWithKey: (key) => `Med taggen ${key.toLowerCase()}`, kpiFootprint: "Byggnadsarea", kpiFootprintNote: "fotavtryck på marken",
+    kpiFloor: "Våningsarea", kpiAssumed: (share) => `${share} av byggnaderna har antagna 2 våningar`,
+    matTitle: (key, measure) => `${key}material · ${measure.toLowerCase()}`,
+    matHint: "Klicka på ett material för att filtrera kartan.", reset: "Rensa filter",
+    typeTitle: "Byggnadstyp", typeAll: "Alla material", typeWith: (m) => `Byggnader med ${m.toLowerCase()}`,
+    cmpTitle: "Jämförelse mellan länderna", cmpHint: (measure, key) => `Andel av ${measure.toLowerCase()} per material · ${key.toLowerCase()}`,
+    rest: (n) => `Övriga (${n})`, other: "Övriga", none: "Inga byggnader med den här taggen.",
+    buildings: "Byggnader", footprint: "Byggnadsarea", floor: "Våningsarea", levels: "Våningar", assumed: "(antaget)",
+    osmLink: "Visa i OpenStreetMap ↗", million: "milj.",
+    footer: `Våningsarea = byggnadsarea × antal våningar (<code>building:levels</code>); saknas uppgiften antas 2 våningar.
+      Data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-bidragsgivare via Overpass API.
+      Taggningen är ofullständig – siffrorna visar vad som är kartlagt, inte hela beståndet.`,
+    noData: "<h1>Ingen data hittades</h1><p class=\"sub\">Kör <code>uv run python osm_materials.py</code> för att skapa <code>data/materials_*.js</code> och ladda om sidan.</p>",
+    noMap: "Kartan kräver internetanslutning (MapLibre laddas från CDN).",
+    materials: {
+      wood: "Trä", brick: "Tegel", concrete: "Betong", plaster: "Puts", metal: "Metall", stone: "Sten",
+      roof_tiles: "Takpannor", glass: "Glas", tar_paper: "Takpapp", steel: "Stål", grass: "Gräs/torv",
+      slate: "Skiffer", copper: "Koppar", masonry: "Murverk", timber_framing: "Korsvirke",
+      reinforced_concrete: "Armerad betong", sandstone: "Sandsten", limestone: "Kalksten",
+      thatch: "Halm/vass", eternit: "Eternit", tile: "Tegelpannor", tiles: "Plattor", plastic: "Plast",
+      cement_block: "Betongblock", metal_sheet: "Plåt", sheet_metal: "Plåt", gravel: "Grus", asphalt: "Asfalt",
+      bitumen: "Bitumen", other: "Annat (other)", granite: "Granit", clay_tiles: "Lertegel", vinyl: "Vinyl",
+      steel_frame: "Stålstomme", zinc: "Zink", aluminium: "Aluminium", rock: "Berg", roof_greening: "Grönt tak",
+    },
+    types: {
+      yes: "Ospecificerad", house: "Villa", apartments: "Flerbostadshus", detached: "Friliggande hus",
+      residential: "Bostadshus", terrace: "Radhus", shed: "Bod", garage: "Garage", garages: "Garagelänga",
+      allotment_house: "Kolonistuga", church: "Kyrka", school: "Skola", industrial: "Industri",
+      commercial: "Kommersiell", retail: "Handel", office: "Kontor", cabin: "Stuga", farm: "Gård",
+      farm_auxiliary: "Ekonomibyggnad", barn: "Lada", roof: "Tak", hut: "Koja", public: "Offentlig",
+      semidetached_house: "Parhus", service: "Teknikbyggnad", warehouse: "Lager", hospital: "Sjukhus",
+      university: "Universitet", kindergarten: "Förskola", civic: "Samhällsbyggnad", hotel: "Hotell",
+      bungalow: "Enplanshus", boathouse: "Båthus", greenhouse: "Växthus", part: "Byggnadsdel",
+    },
+  },
+  en: {
+    locale: "en-GB",
+    title: "Building materials in OpenStreetMap",
+    subtitle: "Buildings with material tags in Sweden, Norway, Denmark and France",
+    countries: { sweden: "Sweden", norway: "Norway", denmark: "Denmark", france: "France" },
+    keys: { "building:material": "Facade", "roof:material": "Roof", "building:structure": "Structure", "building:facade:material": "Facade (detail)" },
+    measures: { count: "Count", footprint: "Footprint area", floor: "Floor area" },
+    groups: { country: "Country", key: "Material tag", measure: "Measure" },
+    kpiTagged: "Buildings with a material tag", kpiOf: (share, total, parts) => `${share} of ${total} buildings in OSM · +${parts} building parts`,
+    kpiWithKey: (key) => `With the ${key.toLowerCase()} tag`, kpiFootprint: "Footprint area", kpiFootprintNote: "ground footprint",
+    kpiFloor: "Floor area", kpiAssumed: (share) => `${share} of the buildings have assumed 2 levels`,
+    matTitle: (key, measure) => `${key} material · ${measure.toLowerCase()}`,
+    matHint: "Click a material to filter the map.", reset: "Clear filter",
+    typeTitle: "Building type", typeAll: "All materials", typeWith: (m) => `Buildings with ${m.toLowerCase()}`,
+    cmpTitle: "Country comparison", cmpHint: (measure, key) => `Share of ${measure.toLowerCase()} per material · ${key.toLowerCase()}`,
+    rest: (n) => `Other (${n})`, other: "Other", none: "No buildings with this tag.",
+    buildings: "Buildings", footprint: "Footprint area", floor: "Floor area", levels: "Levels", assumed: "(assumed)",
+    osmLink: "View in OpenStreetMap ↗", million: "million",
+    footer: `Floor area = footprint × number of levels (<code>building:levels</code>); 2 levels are assumed when the tag is missing.
+      Data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors via the Overpass API.
+      Tagging is incomplete – the figures show what has been mapped, not the whole building stock.`,
+    noData: "<h1>No data found</h1><p class=\"sub\">Run <code>uv run python osm_materials.py</code> to create <code>data/materials_*.js</code>, then reload.</p>",
+    noMap: "The map needs an internet connection (MapLibre is loaded from a CDN).",
+    materials: {
+      roof_tiles: "Roof tiles", tar_paper: "Tar paper", reinforced_concrete: "Reinforced concrete",
+      metal_sheet: "Sheet metal", sheet_metal: "Sheet metal", cement_block: "Cement block", clay_tiles: "Clay tiles",
+      timber_framing: "Timber framing", steel_frame: "Steel frame", other: "Other (tag value)", grass: "Grass/turf",
+      roof_greening: "Green roof",
+    },
+    types: {
+      yes: "Unspecified", part: "Building part", semidetached_house: "Semi-detached house",
+      farm_auxiliary: "Farm auxiliary", allotment_house: "Allotment house", terrace: "Terraced house",
+    },
+  },
 };
-const MEASURES = {
-  count: { label: "Antal", unit: "byggnader", get: () => 1 },
-  footprint: { label: "Byggnadsarea", unit: "m²", get: (p) => p.footprint_m2 },
-  floor: { label: "Våningsarea", unit: "m²", get: (p) => p.floor_area_m2 },
-};
-// Colour follows the material, never its rank; everything else folds into "Övriga".
+const MEASURES = { count: () => 1, footprint: (p) => p.footprint_m2, floor: (p) => p.floor_area_m2 };
+// Colour follows the material, never its rank; everything else folds into "Other".
 // The order is the palette's validated slot order (adjacent pairs stay colour-blind safe in stacks).
 const COLORED = ["concrete", "roof_tiles", "tar_paper", "wood", "plaster", "glass", "metal", "brick"];
-const SV = {
-  wood: "Trä", brick: "Tegel", concrete: "Betong", plaster: "Puts", metal: "Metall", stone: "Sten",
-  roof_tiles: "Takpannor", glass: "Glas", tar_paper: "Takpapp", steel: "Stål", grass: "Gräs/torv",
-  slate: "Skiffer", copper: "Koppar", masonry: "Murverk", timber_framing: "Korsvirke",
-  reinforced_concrete: "Armerad betong", sandstone: "Sandsten", limestone: "Kalksten",
-  thatch: "Halm/vass", eternit: "Eternit", tile: "Tegelpannor", tiles: "Plattor", plastic: "Plast",
-  cement_block: "Betongblock", metal_sheet: "Plåt", gravel: "Grus", asphalt: "Asfalt",
-  bitumen: "Bitumen", other: "Annat (other)", granite: "Granit", sheet_metal: "Plåt", clay_tiles: "Lertegel",
-  vinyl: "Vinyl", steel_frame: "Stålstomme", zinc: "Zink", aluminium: "Aluminium", rock: "Berg",
-};
-const TYPES_SV = {
-  yes: "Ospecificerad", house: "Villa", apartments: "Flerbostadshus", detached: "Friliggande hus",
-  residential: "Bostadshus", terrace: "Radhus", shed: "Bod", garage: "Garage", garages: "Garagelänga",
-  allotment_house: "Kolonistuga", church: "Kyrka", school: "Skola", industrial: "Industri",
-  commercial: "Kommersiell", retail: "Handel", office: "Kontor", cabin: "Stuga", farm: "Gård",
-  farm_auxiliary: "Ekonomibyggnad", barn: "Lada", roof: "Tak", hut: "Koja", public: "Offentlig",
-  semidetached_house: "Parhus", service: "Teknikbyggnad", warehouse: "Lager", hospital: "Sjukhus",
-  university: "Universitet", kindergarten: "Förskola", civic: "Samhällsbyggnad", hotel: "Hotell",
-  bungalow: "Enplanshus", boathouse: "Båthus", greenhouse: "Växthus", part: "Byggnadsdel",
-};
 
-const state = { country: "sweden", key: "building:material", measure: "floor", material: null };
+const params = new URLSearchParams(location.search);
+const state = {
+  lang: params.get("lang") === "en" || (!params.has("lang") && !navigator.language.startsWith("sv")) ? "en" : "sv",
+  country: "sweden", key: "building:material", measure: "floor", material: null,
+};
+let T = I18N[state.lang];
+
 const $ = (id) => document.getElementById(id);
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const normalize = (v) => v.split(/[;,/]/)[0].trim().toLowerCase().replaceAll(" ", "_");
 const group = (m) => (COLORED.includes(m) ? m : "other");
-const label = (m) => SV[m] ?? m.replaceAll("_", " ");
-const groupLabel = (g) => (g === "other" ? "Övriga" : label(g));
-const nf = new Intl.NumberFormat("sv-SE", { maximumFractionDigits: 0 });
-const dec = new Intl.NumberFormat("sv-SE", { maximumFractionDigits: 1 });
-const compact = { format: (v) => (v >= 1e6 ? `${dec.format(v / 1e6)} milj.` : nf.format(v)) };
-const pct = (x) => new Intl.NumberFormat("sv-SE", { style: "percent", maximumFractionDigits: x < 0.1 ? 1 : 0 }).format(x);
-const fmt = (v, measure) => (measure === "count" ? nf.format(v) : `${compact.format(v)} m²`);
+const humanize = (s) => (s.charAt(0).toUpperCase() + s.slice(1)).replaceAll("_", " ");
+const label = (m) => T.materials[m] ?? humanize(m);
+const typeLabel = (t) => T.types[t] ?? humanize(t);
+const groupLabel = (g) => (g === "other" ? T.other : label(g));
+let nf, dec, pctf, pctf1;
+function setLang(lang) {
+  state.lang = lang;
+  T = I18N[lang];
+  document.documentElement.lang = lang;
+  nf = new Intl.NumberFormat(T.locale, { maximumFractionDigits: 0 });
+  dec = new Intl.NumberFormat(T.locale, { maximumFractionDigits: 1 });
+  pctf = new Intl.NumberFormat(T.locale, { style: "percent", maximumFractionDigits: 0 });
+  pctf1 = new Intl.NumberFormat(T.locale, { style: "percent", maximumFractionDigits: 1 });
+  for (const el of document.querySelectorAll("[data-t]")) el.textContent = T[el.dataset.t];
+  $("footer").innerHTML = T.footer;
+  for (const [id, key] of Object.entries({ country: "country", key: "key", measure: "measure" })) $(id).setAttribute("aria-label", T.groups[key]);
+}
+const pct = (x) => (x < 0.1 ? pctf1 : pctf).format(x);
+const compact = (v) => (v >= 1e6 ? `${dec.format(v / 1e6)} ${T.million}` : nf.format(v));
+const fmt = (v) => (state.measure === "count" ? nf.format(v) : `${compact(v)} m²`);
 
 // ---- data -------------------------------------------------------------------------------------
 const DATA = window.OSM_MATERIALS ?? {};
@@ -206,13 +278,13 @@ for (const [country, fc] of Object.entries(DATA)) {
     const p = f.properties;
     p.country = country;
     p.type = p.building && p.building !== "no" ? p.building : "part";
-    for (const key of Object.keys(KEYS)) if (p[key]) p[`n:${key}`] = normalize(p[key]);
+    for (const key of Object.keys(I18N.sv.keys)) if (p[key]) p[`n:${key}`] = normalize(p[key]);
   }
 }
 
 /** Sum of the current measure per category, largest first. */
 function tally(features, category) {
-  const get = MEASURES[state.measure].get;
+  const get = MEASURES[state.measure];
   const sums = new Map();
   for (const { properties: p } of features) {
     const c = category(p);
@@ -226,9 +298,11 @@ function tally(features, category) {
   return [...sums.values()].sort((a, b) => b.value - a.value);
 }
 
-/** Top n rows, the rest folded into one "Övriga" row. */
-function topN(rows, n) {
+/** Top n rows, the rest folded into one "Other" row. */
+function topN(rows, n, keep = null) {
   if (rows.length <= n + 1) return rows;
+  const kept = rows.findIndex((r) => r.id === keep);
+  if (kept >= n) rows = [...rows.slice(0, n - 1), rows[kept], ...rows.slice(n - 1).filter((r) => r.id !== keep)];
   const rest = rows.slice(n).reduce(
     (acc, r) => ({ ...acc, value: acc.value + r.value, count: acc.count + r.count, footprint: acc.footprint + r.footprint, floor: acc.floor + r.floor }),
     { id: "__rest", value: 0, count: 0, footprint: 0, floor: 0, n: rows.length - n },
@@ -237,27 +311,30 @@ function topN(rows, n) {
 }
 
 // ---- rendering --------------------------------------------------------------------------------
-function segmented(el, options, prop) {
-  el.innerHTML = "";
-  for (const [id, text] of Object.entries(options)) {
-    const b = document.createElement("button");
-    b.textContent = text;
-    b.setAttribute("aria-pressed", String(state[prop] === id));
-    b.disabled = prop === "country" && !DATA[id];
-    b.onclick = () => {
-      state[prop] = id;
-      if (prop !== "measure") state.material = null;
-      render();
-      if (prop === "country") fitCountry();
-    };
-    el.append(b);
+/** Segmented control: built once, then only the pressed state and labels are updated. */
+function segmented(el, options, prop, onChange) {
+  if (!el.children.length) {
+    for (const id of Object.keys(options)) {
+      const b = document.createElement("button");
+      b.dataset.id = id;
+      b.onclick = () => {
+        state[prop] = id;
+        onChange();
+      };
+      el.append(b);
+    }
+  }
+  for (const b of el.children) {
+    b.textContent = options[b.dataset.id];
+    b.setAttribute("aria-pressed", String(state[prop] === b.dataset.id));
+    b.disabled = prop === "country" && !DATA[b.dataset.id];
   }
 }
 
 function tipRows(r) {
-  return `<div><span>Byggnader</span><span>${nf.format(r.count)}</span></div>
-    <div><span>Byggnadsarea</span><span>${nf.format(r.footprint)} m²</span></div>
-    <div><span>Våningsarea</span><span>${nf.format(r.floor)} m²</span></div>`;
+  return `<div><span>${T.buildings}</span><span>${nf.format(r.count)}</span></div>
+    <div><span>${T.footprint}</span><span>${nf.format(r.footprint)} m²</span></div>
+    <div><span>${T.floor}</span><span>${nf.format(r.floor)} m²</span></div>`;
 }
 
 function attachTip(el, html) {
@@ -279,26 +356,28 @@ function bars(el, rows, { name, color, onClick, selected }) {
     const rest = r.id === "__rest";
     const row = document.createElement(onClick && !rest ? "button" : "div");
     row.className = "row" + (selected && selected !== r.id ? " dim" : "");
-    const text = rest ? `Övriga (${r.n})` : name(r.id);
+    const text = esc(rest ? T.rest(r.n) : name(r.id));
     row.innerHTML = `<span class="name">${text}</span>
       <span class="track"><span class="bar" style="width:${(r.value / max) * 100}%;background:${rest ? "var(--m-other)" : color(r.id)}"></span></span>
-      <span class="num">${fmt(r.value, state.measure)}</span>`;
+      <span class="num">${fmt(r.value)}</span>`;
     if (onClick && !rest) row.onclick = () => onClick(r.id);
     attachTip(row, `<b>${text} · ${pct(r.value / total)}</b>${tipRows(r)}`);
     el.append(row);
   }
-  if (!rows.length) el.innerHTML = `<p class="hint">Inga byggnader med den här taggen.</p>`;
+  if (!rows.length) el.innerHTML = `<p class="hint">${T.none}</p>`;
 }
 
 function renderKpis(features, tagged) {
   const fc = DATA[state.country];
   const sum = (list, get) => list.reduce((s, f) => s + get(f.properties), 0);
   const assumed = tagged.filter((f) => f.properties.levels_assumed).length;
+  // total_buildings counts building=* only, so building:part-only objects are reported separately.
+  const whole = features.filter((f) => f.properties.type !== "part").length;
   const tiles = [
-    ["Byggnader med materialtagg", nf.format(features.length), `${pct(features.length / fc.total_buildings)} av ${compact.format(fc.total_buildings)} byggnader i OSM`],
-    [`Med taggen ${KEYS[state.key].toLowerCase()}`, nf.format(tagged.length), state.key],
-    ["Byggnadsarea", `${compact.format(sum(tagged, (p) => p.footprint_m2))} m²`, "fotavtryck på marken"],
-    ["Våningsarea", `${compact.format(sum(tagged, (p) => p.floor_area_m2))} m²`, tagged.length ? `${pct(assumed / tagged.length)} med antagna 2 våningar` : ""],
+    [T.kpiTagged, nf.format(whole), T.kpiOf(pct(whole / fc.total_buildings), compact(fc.total_buildings), nf.format(features.length - whole))],
+    [T.kpiWithKey(T.keys[state.key]), nf.format(tagged.length), state.key],
+    [T.kpiFootprint, `${compact(sum(tagged, (p) => p.footprint_m2))} m²`, T.kpiFootprintNote],
+    [T.kpiFloor, `${compact(sum(tagged, (p) => p.floor_area_m2))} m²`, tagged.length ? T.kpiAssumed(pct(assumed / tagged.length)) : ""],
   ];
   $("kpis").innerHTML = tiles
     .map(([l, v, n]) => `<div class="kpi"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`)
@@ -308,17 +387,25 @@ function renderKpis(features, tagged) {
 function renderCompare() {
   const nkey = `n:${state.key}`;
   $("compare").innerHTML = "";
-  for (const [country, name] of Object.entries(COUNTRIES)) {
-    const rows = tally(DATA[country]?.features ?? [], (p) => (p[nkey] ? group(p[nkey]) : undefined));
+  for (const [country, name] of Object.entries(T.countries)) {
+    if (!DATA[country]) continue;
+    const rows = tally(DATA[country].features, (p) => (p[nkey] ? group(p[nkey]) : undefined));
     const total = rows.reduce((s, r) => s + r.value, 0);
+    const other = rows.find((x) => x.id === "other") ?? { id: "other", value: 0, count: 0, footprint: 0, floor: 0 };
+    for (const r of rows) {
+      if (r.id !== "other" && r.value / total < 0.003) {
+        other.value += r.value; other.count += r.count; other.footprint += r.footprint; other.floor += r.floor;
+        r.value = 0;
+      }
+    }
     const stack = document.createElement("div");
     stack.className = "stack";
     for (const id of [...COLORED, "other"]) {
-      const r = rows.find((x) => x.id === id);
-      if (!r || r.value / total < 0.002) continue;
+      const r = id === "other" ? other : rows.find((x) => x.id === id);
+      if (!r || r.value <= 0) continue;
       const seg = document.createElement("span");
       seg.style.cssText = `flex:${r.value};background:var(--m-${id})`;
-      attachTip(seg, `<b>${name} · ${groupLabel(id)} · ${pct(r.value / total)}</b>${tipRows(r)}`);
+      attachTip(seg, `<b>${name} · ${esc(groupLabel(id))} · ${pct(r.value / total)}</b>${tipRows(r)}`);
       stack.append(seg);
     }
     const lab = document.createElement("span");
@@ -327,23 +414,35 @@ function renderCompare() {
     $("compare").append(lab, stack);
   }
   $("cmpLegend").innerHTML = [...COLORED, "other"]
-    .map((id) => `<span><i class="sw" style="background:var(--m-${id})"></i>${groupLabel(id)}</span>`)
+    .map((id) => `<span><i class="sw" style="background:var(--m-${id})"></i>${esc(groupLabel(id))}</span>`)
     .join("");
-  $("cmpHint").textContent = `Andel av ${MEASURES[state.measure].label.toLowerCase()} per material · ${KEYS[state.key].toLowerCase()}`;
+  $("cmpHint").textContent = T.cmpHint(T.measures[state.measure], T.keys[state.key]);
 }
 
 function render() {
-  segmented($("country"), COUNTRIES, "country");
-  segmented($("key"), KEYS, "key");
-  segmented($("measure"), Object.fromEntries(Object.entries(MEASURES).map(([k, m]) => [k, m.label])), "measure");
+  segmented($("lang"), { sv: "SV", en: "EN" }, "lang", () => {
+    setLang(state.lang);
+    history.replaceState(null, "", `?lang=${state.lang}`);
+    render();
+  });
+  const select = () => {
+    state.material = null;
+    render();
+  };
+  segmented($("country"), T.countries, "country", () => {
+    select();
+    fitCountry();
+  });
+  segmented($("key"), T.keys, "key", select);
+  segmented($("measure"), T.measures, "measure", render);
 
   const nkey = `n:${state.key}`;
   const features = DATA[state.country]?.features ?? [];
   const tagged = features.filter((f) => f.properties[nkey]);
   renderKpis(features, tagged);
 
-  $("matTitle").textContent = `${KEYS[state.key]}material · ${MEASURES[state.measure].label.toLowerCase()}`;
-  bars($("materials"), topN(tally(tagged, (p) => p[nkey]), 10), {
+  $("matTitle").textContent = T.matTitle(T.keys[state.key], T.measures[state.measure]);
+  bars($("materials"), topN(tally(tagged, (p) => p[nkey]), 10, state.material), {
     name: label,
     color: (id) => `var(--m-${group(id)})`,
     selected: state.material,
@@ -355,11 +454,8 @@ function render() {
   $("reset").hidden = !state.material;
 
   const inFilter = state.material ? tagged.filter((f) => f.properties[nkey] === state.material) : tagged;
-  $("typeHint").textContent = state.material ? `Byggnader med ${label(state.material).toLowerCase()}` : "Alla material";
-  bars($("types"), topN(tally(inFilter, (p) => p.type), 8), {
-    name: (t) => TYPES_SV[t] ?? t.replaceAll("_", " "),
-    color: () => "var(--seq)",
-  });
+  $("typeHint").textContent = state.material ? T.typeWith(label(state.material)) : T.typeAll;
+  bars($("types"), topN(tally(inFilter, (p) => p.type), 8), { name: typeLabel, color: () => "var(--seq)" });
   renderCompare();
   updateMap();
 }
@@ -389,7 +485,7 @@ function colorExpr() {
 function updateMap() {
   if (!mapReady) return;
   const nkey = `n:${state.key}`;
-  const filter = state.material ? ["==", ["get", nkey], state.material] : ["has", nkey];
+  const filter = ["all", ["==", ["get", "country"], state.country], state.material ? ["==", ["get", nkey], state.material] : ["has", nkey]];
   for (const layer of ["dots", "fill", "outline"]) map.setFilter(layer, filter);
   map.setPaintProperty("dots", "circle-color", colorExpr());
   map.setPaintProperty("fill", "fill-color", colorExpr());
@@ -398,7 +494,7 @@ function updateMap() {
   );
   $("maplegend").innerHTML = [...COLORED, "other"]
     .filter((id) => present.has(id))
-    .map((id) => `<span><i class="sw" style="background:var(--m-${id})"></i>${groupLabel(id)}</span>`)
+    .map((id) => `<span><i class="sw" style="background:var(--m-${id})"></i>${esc(groupLabel(id))}</span>`)
     .join("");
 }
 
@@ -411,15 +507,15 @@ function fitCountry() {
 }
 
 function popupHtml(p) {
-  const rows = Object.keys(KEYS)
+  const rows = Object.keys(T.keys)
     .filter((k) => p[k])
-    .map((k) => `<div><span>${KEYS[k]}</span><span>${p[k]}</span></div>`)
+    .map((k) => `<div><span>${T.keys[k]}</span><span>${esc(p[k])}</span></div>`)
     .join("");
-  return `<div class="pop"><b>${p.name ?? TYPES_SV[p.type] ?? p.type}</b>${rows}
-    <div><span>Våningar</span><span>${p.levels}${p.levels_assumed ? " (antaget)" : ""}</span></div>
-    <div><span>Byggnadsarea</span><span>${nf.format(p.footprint_m2)} m²</span></div>
-    <div><span>Våningsarea</span><span>${nf.format(p.floor_area_m2)} m²</span></div>
-    <a href="https://www.openstreetmap.org/${p.osm_id}" target="_blank" rel="noopener">Visa i OpenStreetMap ↗</a></div>`;
+  return `<div class="pop"><b>${esc(p.name ?? typeLabel(p.type))}</b>${rows}
+    <div><span>${T.levels}</span><span>${dec.format(p.levels)}${p.levels_assumed ? ` ${T.assumed}` : ""}</span></div>
+    <div><span>${T.footprint}</span><span>${nf.format(p.footprint_m2)} m²</span></div>
+    <div><span>${T.floor}</span><span>${nf.format(p.floor_area_m2)} m²</span></div>
+    <a href="https://www.openstreetmap.org/${esc(p.osm_id)}" target="_blank" rel="noopener">${T.osmLink}</a></div>`;
 }
 
 function initMap() {
@@ -429,6 +525,9 @@ function initMap() {
     bounds: [-5, 42, 25, 71.3],
   });
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+  map.on("error", (e) => {
+    if (!mapReady) $("maplegend").textContent = `${T.noMap} ${e.error?.message ?? ""}`;
+  });
   map.once("style.load", () => {
     const all = Object.values(DATA).flatMap((fc) => fc.features);
     map.addSource("buildings", { type: "geojson", data: { type: "FeatureCollection", features: all } });
@@ -450,10 +549,14 @@ function initMap() {
         "circle-stroke-opacity": ["interpolate", ["linear"], ["zoom"], 12.5, 1, 14, 0],
       },
     });
-    map.addLayer({ id: "fill", type: "fill", source: "buildings", minzoom: 12, filter: ["!=", ["geometry-type"], "Point"], paint: { "fill-opacity": 0.85 } });
+    map.addLayer({ id: "fill", type: "fill", source: "buildings", minzoom: 12, paint: { "fill-opacity": 0.85 } });
     map.addLayer({ id: "outline", type: "line", source: "buildings", minzoom: 12, paint: { "line-color": surface, "line-width": 1 } });
+    // One handler for both layers, so a building hit by a dot and its polygon opens one popup.
+    map.on("click", (e) => {
+      const hit = map.queryRenderedFeatures(e.point, { layers: ["fill", "dots"] })[0];
+      if (hit) new maplibregl.Popup({ maxWidth: "280px" }).setLngLat(e.lngLat).setHTML(popupHtml(hit.properties)).addTo(map);
+    });
     for (const layer of ["dots", "fill"]) {
-      map.on("click", layer, (e) => new maplibregl.Popup({ maxWidth: "280px" }).setLngLat(e.lngLat).setHTML(popupHtml(e.features[0].properties)).addTo(map));
       map.on("mouseenter", layer, () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", layer, () => (map.getCanvas().style.cursor = ""));
     }
@@ -463,13 +566,14 @@ function initMap() {
   });
 }
 
+setLang(state.lang);
 if (!Object.keys(DATA).length) {
-  $("side").innerHTML = `<div id="missing"><h1>Ingen data hittades</h1><p class="sub">Kör <code>uv run python osm_materials.py</code> för att skapa <code>data/materials_*.js</code> och ladda om sidan.</p></div>`;
+  $("side").innerHTML = `<div id="missing">${T.noData}</div>`;
 } else {
   if (!DATA[state.country]) state.country = Object.keys(DATA)[0];
   render();
   if (window.maplibregl) initMap();
-  else $("map").innerHTML = `<p style="padding:24px">Kartan kräver internetanslutning (MapLibre laddas från CDN).</p>`;
+  else $("map").innerHTML = `<p style="padding:24px">${T.noMap}</p>`;
 }
 </script>
 </body>

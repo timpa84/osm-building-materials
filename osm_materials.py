@@ -17,8 +17,9 @@ OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 TAGINFO_URL = "https://taginfo.geofabrik.de/europe:{name}/api/4/key/stats?key=building"
 USER_AGENT = "osm-materials-research/0.1"
 COUNTRIES = {"SE": "sweden", "NO": "norway", "DK": "denmark", "FR": "france"}
-# Metropolitan France (relation 1403916): the ISO area also spans the overseas territories,
-# which the Geofabrik extract behind total_buildings() does not.
+# Metropolitan France (relation 1403916): the ISO area also spans the overseas territories.
+# The Geofabrik "france" extract behind total_buildings() may include the overseas
+# departments, which slightly inflates the French denominator.
 AREA_OVERRIDES = {"FR": "area(3601403916)"}
 MATERIAL_KEYS = (
     "building:material",
@@ -58,16 +59,28 @@ def stitch_rings(ways: list[Ring]) -> list[Ring]:
     remaining = [list(w) for w in ways]
     rings: list[Ring] = []
     while remaining:
-        ring = remaining.pop()
+        ring, used = remaining.pop(), []
         while ring[0] != ring[-1]:
             nxt = next((w for w in remaining if ring[-1] in (w[0], w[-1])), None)
             if nxt is None:
+                remaining.extend(used)  # give the pieces back so sibling rings still close
                 break
             remaining.remove(nxt)
+            used.append(nxt)
             ring += nxt[1:] if nxt[0] == ring[-1] else nxt[-2::-1]
         if ring[0] == ring[-1] and len(ring) >= 4:
             rings.append(ring)
     return rings
+
+
+def point_in_ring(point: Coord, ring: Ring) -> bool:
+    """Ray casting; used to assign each hole to the outer ring that contains it."""
+    x, y = point
+    inside = False
+    for (x1, y1), (x2, y2) in pairwise(ring):
+        if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+            inside = not inside
+    return inside
 
 
 def geometry(element: dict[str, Any]) -> tuple[dict[str, Any], float] | None:
@@ -81,24 +94,30 @@ def geometry(element: dict[str, Any]) -> tuple[dict[str, Any], float] | None:
     if element["type"] == "way":
         outers, inners = stitch_rings([ring(element["geometry"])]), []
     else:
+        # Only multipolygon roles: a type=building relation's "outline"/"part" members
+        # would otherwise be summed as separate footprints.
         members = [m for m in element["members"] if m["type"] == "way" and "geometry" in m]
-        outers = stitch_rings([ring(m["geometry"]) for m in members if m["role"] != "inner"])
+        outers = stitch_rings([ring(m["geometry"]) for m in members if m["role"] in ("outer", "")])
         inners = stitch_rings([ring(m["geometry"]) for m in members if m["role"] == "inner"])
     if not outers:
         return None
     area = sum(map(ring_area_m2, outers)) - sum(map(ring_area_m2, inners))
-    if len(outers) == 1:
-        return {"type": "Polygon", "coordinates": [outers[0], *inners]}, area
-    # Holes are not matched to their outer ring; they only count towards the area.
-    return {"type": "MultiPolygon", "coordinates": [[o] for o in outers]}, area
+    polygons = [[o] for o in outers]
+    for hole in inners:
+        polygon = next((p for p in polygons if point_in_ring(hole[0], p[0])), polygons[0])
+        polygon.append(hole)
+    if len(polygons) == 1:
+        return {"type": "Polygon", "coordinates": polygons[0]}, area
+    return {"type": "MultiPolygon", "coordinates": polygons}, area
 
 
 def parse_levels(value: str | None) -> float | None:
+    """'2' -> 2.0, '2;3' -> 2.0 (first value, like normalize()), '0' -> 0.0, junk -> None."""
     try:
-        levels = float(value or "")
+        levels = float(normalize(value or ""))
     except ValueError:
         return None
-    return levels if 0 < levels < 200 else None
+    return levels if 0 <= levels < 200 else None
 
 
 def to_feature(element: dict[str, Any]) -> Feature | None:
@@ -108,7 +127,7 @@ def to_feature(element: dict[str, Any]) -> Feature | None:
     tags: dict[str, str] = element.get("tags", {})
     props: dict[str, Any] = {k: tags[k] for k in KEPT_KEYS if k in tags}
     levels = parse_levels(tags.get("building:levels"))
-    props["levels"] = levels or DEFAULT_LEVELS
+    props["levels"] = DEFAULT_LEVELS if levels is None else levels
     props["levels_assumed"] = levels is None
     props["footprint_m2"] = round(geom[1], 1)
     props["floor_area_m2"] = round(geom[1] * props["levels"], 1)
@@ -136,14 +155,27 @@ def summarize(features: list[Feature]) -> list[tuple[str, str, int, int, int]]:
     return sorted(rows, key=lambda r: -r[4])
 
 
+def dashboard_js(name: str, geojson: str) -> str:
+    """The GeoJSON as a script, so dashboard.html works from file:// without a server.
+
+    A literal '</script>' inside an OSM tag value would end the script tag early, so '</'
+    is escaped as '<\\/' (the same string once JS reads the literal).
+    """
+    # JSON.parse of one string literal is much faster and lighter than parsing a 60 MB object literal.
+    literal = json.dumps(geojson, ensure_ascii=False).replace("</", "<\\/")
+    return f'(window.OSM_MATERIALS ??= {{}})["{name}"] = JSON.parse({literal});\n'
+
+
 def overpass(query: str, retries: int = 8) -> dict[str, Any]:
     for attempt in range(retries):
         r = httpx.post(
             OVERPASS_URL, data={"data": query}, headers={"User-Agent": USER_AGENT}, timeout=1000
         )
         # Overpass reports rate limiting as 429/504, and runtime errors as a "remark".
-        if r.status_code == 200 and "remark" not in r.json():
-            return r.json()
+        if r.status_code == 200:
+            body = r.json()
+            if "remark" not in body:
+                return body
         wait = 30 * (attempt + 1)
         print(f"  HTTP {r.status_code}, retrying in {wait}s")
         time.sleep(wait)
@@ -171,17 +203,22 @@ def load_raw(iso: str, path: Path, refresh: bool) -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("countries", nargs="*", default=list(COUNTRIES), choices=COUNTRIES)
+    # No list default together with choices: argparse < 3.14 would validate the list itself.
+    parser.add_argument("countries", nargs="*", choices=COUNTRIES)
     parser.add_argument("--out", type=Path, default=Path("data"))
     parser.add_argument("--refresh", action="store_true", help="refetch even if cached")
     args = parser.parse_args()
     args.out.mkdir(exist_ok=True)
 
-    for iso in args.countries:
+    for iso in args.countries or COUNTRIES:
         name = COUNTRIES[iso]
         print(f"Processing {name}...")
         raw = load_raw(iso, args.out / f"raw_{name}.json", args.refresh)
         features = [f for e in raw["elements"] if (f := to_feature(e))]
+        if len(features) < len(raw["elements"]):
+            print(
+                f"  dropped {len(raw['elements']) - len(features)} elements without a closed ring"
+            )
         collection = {
             "type": "FeatureCollection",
             "total_buildings": raw["total_buildings"],
@@ -189,9 +226,8 @@ def main() -> None:
         }
         geojson = json.dumps(collection, ensure_ascii=False, separators=(",", ":"))
         (args.out / f"materials_{name}.geojson").write_text(geojson, encoding="utf-8")
-        # Same data as a script, so dashboard.html works from file:// without a server.
         (args.out / f"materials_{name}.js").write_text(
-            f'(window.OSM_MATERIALS ??= {{}})["{name}"] = {geojson};\n', encoding="utf-8"
+            dashboard_js(name, geojson), encoding="utf-8"
         )
         with (args.out / f"summary_{name}.csv").open("w", newline="", encoding="utf-8") as fh:
             writer = csv.writer(fh)

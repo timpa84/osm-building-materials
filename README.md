@@ -15,7 +15,8 @@ uv run python osm_materials.py --refresh  # refetch instead of using data/raw_*.
 ```
 
 Then open `dashboard.html` in a browser (double-click – no server needed; it
-needs internet for the base map and MapLibre itself).
+needs internet for the base map and MapLibre itself). The UI is in English or
+Swedish: toggle with the SV/EN buttons or open `dashboard.html?lang=en`.
 
 Data comes live from the Overpass API, so results reflect OSM at fetch time. The
 raw response is cached in `data/raw_<country>.json`.
@@ -38,7 +39,9 @@ raw response is cached in `data/raw_<country>.json`.
   takes a few seconds longer to load).
 - Material tagging is sparse and unevenly mapped; numbers describe what is mapped,
   not the building stock.
-- A `building:part` inside a tagged `building` counts twice in area sums.
+- A `building:part` inside a tagged `building` counts twice in area sums. Coverage
+  ("x % of buildings") counts `building=*` objects only; parts are listed separately.
+- `building:levels=0` counts as zero floor area; `2;3` uses the first value.
 - Areas are gross footprint/floor areas, not material volumes or masses.
 
 ## Develop
