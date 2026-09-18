@@ -15,8 +15,12 @@ uv run python osm_materials.py --refresh  # refetch instead of using data/raw_*.
 ```
 
 Then open `dashboard.html` in a browser (double-click – no server needed; it
-needs internet for the base map and MapLibre itself). The UI is in Swedish by
-default; switch to English with the SV/EN buttons or `dashboard.html?lang=en`.
+needs internet for the base map and MapLibre itself). The UI is in English by
+default; switch to Swedish with the SV/EN buttons or `dashboard.html?lang=sv`.
+
+To share the dashboard, run `uv run python osm_materials.py --dist`: it writes
+`dist/osm-materials-dashboard/` (dashboard, data scripts, summary CSVs and a
+README.txt) and a zip of it. Recipients unzip and double-click `dashboard.html`.
 
 Street view: zoom in and click a street. The screen splits in two, with Google
 Street View looking from the clicked point at the nearest tagged building; the

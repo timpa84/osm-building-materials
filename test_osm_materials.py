@@ -1,8 +1,12 @@
 import json
+import zipfile
+from pathlib import Path
 
 import pytest
 
 from osm_materials import (
+    DIST_NAME,
+    build_dist,
     build_query,
     dashboard_js,
     geometry,
@@ -189,3 +193,28 @@ def test_dashboard_js_escapes_script_end_tag() -> None:
     # The literal, once JS has read it, is the original JSON again.
     literal = js[len(prefix) : -len(");\n")]
     assert json.loads(literal.replace("<\\/", "</")) == '{"name":"</script><b>x"}'
+
+
+def test_build_dist_packages_dashboard_and_data(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    data.mkdir()
+    for name in (
+        "materials_sweden.js",
+        "materials_sweden.geojson",
+        "summary_sweden.csv",
+        "raw_sweden.json",
+    ):
+        (data / name).write_text("x", encoding="utf-8")
+    archive = build_dist(data, tmp_path / "dist")
+    build_dist(data, tmp_path / "dist")  # rebuilding replaces the previous folder
+    with zipfile.ZipFile(archive) as z:
+        names = {n for n in z.namelist() if not n.endswith("/")}
+    assert names == {
+        f"{DIST_NAME}/{n}"
+        for n in (
+            "dashboard.html",
+            "README.txt",
+            "data/materials_sweden.js",
+            "data/summary_sweden.csv",
+        )
+    }

@@ -5,8 +5,10 @@ import csv
 import json
 import math
 import re
+import shutil
 import time
 from collections import defaultdict
+from datetime import UTC, datetime
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -201,14 +203,59 @@ def load_raw(iso: str, path: Path, refresh: bool) -> dict[str, Any]:
     return raw
 
 
+DIST_NAME = "osm-materials-dashboard"
+DIST_README = """OSM building materials - dashboard
+===================================
+
+Open dashboard.html in Chrome, Edge or Firefox (double-click; no installation or server).
+Keep the data folder next to it. An internet connection is needed for the base map.
+
+- Language: English by default; switch with the SV/EN buttons (or dashboard.html?lang=sv).
+- Pick a country, a material tag (facade, roof, structure) and a measure; click a material
+  bar to filter the map. Click a building for its tags.
+- Street view: zoom in and click a street. The screen splits in two and Google Street View
+  looks at the nearest tagged building; the view cone is drawn on the map. Click another
+  building to re-aim, drag the divider to resize. The cone shows the initial direction only.
+- data/summary_<country>.csv holds the totals per tag and material.
+
+Floor area = footprint x building:levels (2 levels assumed when the tag is missing).
+Tagging in OpenStreetMap is incomplete: the figures show what is mapped, not the whole stock.
+
+Data (c) OpenStreetMap contributors, ODbL 1.0 - https://www.openstreetmap.org/copyright
+Fetched via the Overpass API on {fetched}.
+"""
+
+
+def build_dist(data: Path, dist: Path) -> Path:
+    """Self-contained copy of the dashboard for sharing: dist/<DIST_NAME>/ and a zip of it."""
+    scripts = sorted(data.glob("materials_*.js"))
+    if not scripts:
+        raise SystemExit(f"No materials_*.js in {data}; run without --dist first.")
+    folder = dist / DIST_NAME
+    if folder.exists():
+        shutil.rmtree(folder)
+    (folder / "data").mkdir(parents=True)
+    shutil.copy2(Path(__file__).with_name("dashboard.html"), folder)
+    for path in (*scripts, *sorted(data.glob("summary_*.csv"))):
+        shutil.copy2(path, folder / "data")
+    newest = max(p.stat().st_mtime for p in scripts)
+    fetched = datetime.fromtimestamp(newest, tz=UTC).date().isoformat()
+    (folder / "README.txt").write_text(DIST_README.format(fetched=fetched), encoding="utf-8")
+    return Path(shutil.make_archive(str(folder), "zip", root_dir=dist, base_dir=DIST_NAME))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     # No list default together with choices: argparse < 3.14 would validate the list itself.
     parser.add_argument("countries", nargs="*", choices=COUNTRIES)
     parser.add_argument("--out", type=Path, default=Path("data"))
     parser.add_argument("--refresh", action="store_true", help="refetch even if cached")
+    parser.add_argument("--dist", action="store_true", help="only package dist/ for sharing")
     args = parser.parse_args()
     args.out.mkdir(exist_ok=True)
+    if args.dist:
+        print(f"Wrote {build_dist(args.out, Path('dist'))}")
+        return
 
     for iso in args.countries or COUNTRIES:
         name = COUNTRIES[iso]

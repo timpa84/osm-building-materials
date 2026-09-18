@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="sv">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -275,7 +275,7 @@ const COLORED = ["concrete", "roof_tiles", "tar_paper", "wood", "plaster", "glas
 
 const params = new URLSearchParams(location.search);
 const state = {
-  lang: params.get("lang") === "en" ? "en" : "sv",
+  lang: params.get("lang") === "sv" ? "sv" : "en",
   country: "all", key: "building:material", measure: "floor", material: null,
 };
 let T = I18N[state.lang];
