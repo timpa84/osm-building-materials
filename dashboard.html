@@ -38,7 +38,10 @@ body {
 }
 #side { overflow-y: auto; padding: 20px 16px 32px; display: flex; flex-direction: column; gap: 12px; }
 #stage { display: grid; grid-template-columns: minmax(0, 1fr); height: 100vh; }
-#stage.split { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#stage.split { grid-template-columns: minmax(0, var(--split, 50%)) 8px minmax(0, 1fr); }
+#svHandle { background: var(--grid); cursor: col-resize; touch-action: none; }
+#svHandle:hover, #svHandle:focus-visible { background: var(--muted); outline: none; }
+#stage:not(.split) #svHandle { display: none; }
 #map { height: 100%; }
 h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
 .titlebar { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
@@ -111,7 +114,7 @@ footer a, .maplibregl-popup a { color: var(--seq); }
   position: absolute; left: 12px; top: 12px; z-index: 2; max-width: calc(100% - 80px); background: var(--surface);
   border: 1px solid var(--border); border-radius: 10px; padding: 6px 10px; font-size: 12px; color: var(--ink-2);
 }
-#sv { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--border); background: var(--surface); }
+#sv { display: flex; flex-direction: column; min-height: 0; background: var(--surface); }
 #sv[hidden] { display: none; }
 #sv header { display: flex; align-items: start; gap: 12px; padding: 10px 12px; }
 #sv header div { flex: 1; min-width: 0; }
@@ -124,7 +127,8 @@ footer a, .maplibregl-popup a { color: var(--seq); }
   body { grid-template-columns: 1fr; }
   #side { overflow: visible; }
   #stage { height: 70vh; }
-  #stage.split { grid-template-columns: minmax(0, 1fr); grid-template-rows: repeat(2, minmax(0, 1fr)); height: 140vh; }
+  #stage.split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, var(--split, 50%)) 8px minmax(0, 1fr); height: 140vh; }
+  #svHandle { cursor: row-resize; }
 }
 </style>
 </head>
@@ -164,6 +168,7 @@ footer a, .maplibregl-popup a { color: var(--seq); }
 </aside>
 <div id="stage">
   <div id="mapwrap"><div id="map"></div><div id="maphint" data-t="svHint"></div><div id="maplegend"></div></div>
+  <div id="svHandle" role="separator" tabindex="0"></div>
   <section id="sv" hidden>
     <header>
       <div><b id="svTitle"></b><span id="svNote"></span> <a id="svLink" target="_blank" rel="noopener" data-t="svOpen"></a></div>
@@ -196,7 +201,7 @@ const I18N = {
     rest: (n) => `Övriga (${n})`, other: "Övriga", none: "Inga byggnader med den här taggen.",
     buildings: "Byggnader", footprint: "Byggnadsarea", floor: "Våningsarea", levels: "Våningar", assumed: "(antaget)",
     osmLink: "Visa i OpenStreetMap ↗", million: "milj.",
-    svHint: "Zooma in och klicka på en gata för gatuvy mot närmaste byggnad.", svOpen: "Öppna i Google Maps ↗", svClose: "Stäng",
+    svHint: "Zooma in och klicka på en gata för gatuvy mot närmaste byggnad.", svOpen: "Öppna i Google Maps ↗", svClose: "Stäng", svResize: "Ändra storlek på karta och gatuvy",
     svNone: (m) => `Ingen byggnad med materialtagg inom ${m} m – klicka närmare en färgad byggnad.`,
     svNote: (m) => `${m} m bort · konen visar startriktningen. Klicka på en annan byggnad för att rikta om.`,
     footer: `Våningsarea = byggnadsarea × antal våningar (<code>building:levels</code>); saknas uppgiften antas 2 våningar.
@@ -243,7 +248,7 @@ const I18N = {
     rest: (n) => `Other (${n})`, other: "Other", none: "No buildings with this tag.",
     buildings: "Buildings", footprint: "Footprint area", floor: "Floor area", levels: "Levels", assumed: "(assumed)",
     osmLink: "View in OpenStreetMap ↗", million: "million",
-    svHint: "Zoom in and click a street for a street view of the nearest building.", svOpen: "Open in Google Maps ↗", svClose: "Close",
+    svHint: "Zoom in and click a street for a street view of the nearest building.", svOpen: "Open in Google Maps ↗", svClose: "Close", svResize: "Resize map and street view",
     svNone: (m) => `No building with a material tag within ${m} m – click closer to a coloured building.`,
     svNote: (m) => `${m} m away · the cone shows the initial direction. Click another building to re-aim.`,
     footer: `Floor area = footprint × number of levels (<code>building:levels</code>); 2 levels are assumed when the tag is missing.
@@ -296,6 +301,7 @@ function setLang(lang) {
   for (const el of document.querySelectorAll("[data-t]")) el.textContent = T[el.dataset.t];
   $("footer").innerHTML = T.footer;
   for (const [id, key] of Object.entries({ country: "country", key: "key", measure: "measure" })) $(id).setAttribute("aria-label", T.groups[key]);
+  $("svHandle").setAttribute("aria-label", T.svResize);
 }
 const pct = (x) => (x < 0.1 ? pctf1 : pctf).format(x);
 const compact = (v) => (v >= 1e6 ? `${dec.format(v / 1e6)} ${T.million}` : nf.format(v));
@@ -636,6 +642,34 @@ function showStreetView(pos, target) {
   if (opening) map.fitBounds(new maplibregl.LngLatBounds(pos, pos).extend(aim), { padding: 120, maxZoom: Math.max(map.getZoom(), 17.5), duration: 600 });
 }
 $("svClose").onclick = closeStreetView;
+
+/** Drag (or arrow-key) the divider to resize map and street view; stacked layouts resize vertically. */
+function setSplit(fraction) {
+  $("stage").style.setProperty("--split", `${Math.min(Math.max(fraction, 0.15), 0.85) * 100}%`);
+  map.resize();
+}
+const stacked = () => matchMedia("(max-width: 860px)").matches;
+const splitNow = () => {
+  const [stage, pane] = [$("stage"), $("mapwrap")].map((el) => el.getBoundingClientRect());
+  return stacked() ? pane.height / stage.height : pane.width / stage.width;
+};
+const handle = $("svHandle");
+handle.onpointerdown = (e) => {
+  handle.setPointerCapture(e.pointerId);
+  $("svFrame").style.pointerEvents = "none"; // the iframe would otherwise swallow the drag
+};
+handle.onpointermove = (e) => {
+  if (!handle.hasPointerCapture(e.pointerId)) return;
+  const r = $("stage").getBoundingClientRect();
+  setSplit(stacked() ? (e.clientY - r.top) / r.height : (e.clientX - r.left) / r.width);
+};
+handle.onpointerup = handle.onpointercancel = () => ($("svFrame").style.pointerEvents = "");
+handle.onkeydown = (e) => {
+  const step = { ArrowLeft: -0.05, ArrowUp: -0.05, ArrowRight: 0.05, ArrowDown: 0.05 }[e.key];
+  if (!step) return;
+  e.preventDefault();
+  setSplit(splitNow() + step);
+};
 
 function mapHint(text) {
   $("maphint").textContent = text;
