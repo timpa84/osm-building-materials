@@ -6,12 +6,17 @@ material tag – `building:material`, `building:facade:material`,
 plus a MapLibre dashboard with statistics.
 
 > **Status: early test.** An exploratory prototype made within
-> [BEAM ME UP](https://www.sintef.no/en/projects/2026/beam-me-up/), a project in the
-> Driving Urban Transitions (DUT) partnership on better building stock models for
-> circular urban development. It asks a narrow question: how much can
-> crowd-sourced OSM material tags tell us about what buildings are made of? Coverage
-> is well below 1 % of buildings, so treat the numbers as a view of what is mapped,
-> not of the building stock. Not an official project deliverable.
+> [Beam me up!](https://dutpartnership.eu/projects/beam-me) (BEAM ME UP), a
+> Driving Urban Transitions (DUT) project in the Circular Urban Economies pathway
+> (DUT Call 2024, 2026–2028, coordinated by SINTEF). The project aims to enhance
+> building stock models for circular urban development by combining diverse data
+> sources to predict construction material streams for reuse, repurposing and
+> recycling. The four countries here are the project's partner countries.
+>
+> This test asks a narrow question: how much can crowd-sourced OSM material tags
+> tell us about what buildings are made of? Coverage is well below 1 % of
+> buildings, so treat the numbers as a view of what is mapped, not of the building
+> stock. Not an official project deliverable.
 
 ## Run
 
