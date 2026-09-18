@@ -2,5 +2,7 @@
 __pycache__/
 .pytest_cache/
 .ruff_cache/
-data/
+# data/ is committed so the dashboard works straight from a clone (and on GitHub Pages);
+# only the large Overpass cache stays out. dist/ is a regenerable copy of the same files.
+data/raw_*.json
 dist/

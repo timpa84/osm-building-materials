@@ -43,7 +43,11 @@ which is unofficial: the cone shows the initial direction only (the iframe canno
 report back where you turn), and Google snaps to the nearest panorama.
 
 Data comes live from the Overpass API, so results reflect OSM at fetch time. The
-raw response is cached in `data/raw_<country>.json`.
+raw response is cached in `data/raw_<country>.json` (not committed).
+
+The generated files in `data/` are committed (fetched 2026-09-18), so a fresh clone
+can open `dashboard.html` right away without running the script. The GeoJSON files
+open directly in QGIS.
 
 ## Output (`data/`)
 
@@ -78,5 +82,5 @@ uv run python -m pytest
 
 ## License
 
-Code: MIT, see `LICENSE`. Data: © OpenStreetMap contributors, ODbL 1.0 – the
-generated files in `data/` and `dist/` are not part of the repository.
+Code: MIT, see `LICENSE`. The files in `data/` are derived from OpenStreetMap:
+© OpenStreetMap contributors, [ODbL 1.0](https://www.openstreetmap.org/copyright).
