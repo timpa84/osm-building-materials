@@ -37,7 +37,9 @@ body {
   font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 #side { overflow-y: auto; padding: 20px 16px 32px; display: flex; flex-direction: column; gap: 12px; }
-#map { height: 100vh; }
+#stage { display: grid; grid-template-columns: minmax(0, 1fr); height: 100vh; }
+#stage.split { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#map { height: 100%; }
 h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
 .titlebar { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .seg.lang { flex: none; padding: 2px; }
@@ -104,12 +106,25 @@ footer a, .maplibregl-popup a { color: var(--seq); }
   border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; font-size: 12px;
   display: grid; gap: 2px; color: var(--ink-2);
 }
-#mapwrap { position: relative; }
+#mapwrap { position: relative; min-height: 0; }
+#maphint {
+  position: absolute; left: 12px; top: 12px; z-index: 2; max-width: calc(100% - 80px); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 10px; padding: 6px 10px; font-size: 12px; color: var(--ink-2);
+}
+#sv { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--border); background: var(--surface); }
+#sv[hidden] { display: none; }
+#sv header { display: flex; align-items: start; gap: 12px; padding: 10px 12px; }
+#sv header div { flex: 1; min-width: 0; }
+#sv header b { display: block; font-size: 13px; }
+#sv header span, #sv header a { font-size: 12px; color: var(--ink-2); }
+#sv header button { border: 1px solid var(--border); background: none; color: var(--ink); border-radius: 8px; padding: 4px 10px; cursor: pointer; font: inherit; font-size: 12px; }
+#sv iframe { flex: 1; width: 100%; border: 0; min-height: 0; }
 #missing { padding: 40px; }
 @media (max-width: 860px) {
-  body { grid-template-columns: 1fr; grid-template-rows: auto 70vh; }
+  body { grid-template-columns: 1fr; }
   #side { overflow: visible; }
-  #map { height: 70vh; }
+  #stage { height: 70vh; }
+  #stage.split { grid-template-columns: minmax(0, 1fr); grid-template-rows: repeat(2, minmax(0, 1fr)); height: 140vh; }
 }
 </style>
 </head>
@@ -147,7 +162,16 @@ footer a, .maplibregl-popup a { color: var(--seq); }
   </section>
   <footer id="footer"></footer>
 </aside>
-<div id="mapwrap"><div id="map"></div><div id="maplegend"></div></div>
+<div id="stage">
+  <div id="mapwrap"><div id="map"></div><div id="maphint" data-t="svHint"></div><div id="maplegend"></div></div>
+  <section id="sv" hidden>
+    <header>
+      <div><b id="svTitle"></b><span id="svNote"></span> <a id="svLink" target="_blank" rel="noopener" data-t="svOpen"></a></div>
+      <button id="svClose" data-t="svClose"></button>
+    </header>
+    <iframe id="svFrame" allowfullscreen referrerpolicy="no-referrer"></iframe>
+  </section>
+</div>
 <div id="tip"></div>
 
 <script>
@@ -172,6 +196,9 @@ const I18N = {
     rest: (n) => `Övriga (${n})`, other: "Övriga", none: "Inga byggnader med den här taggen.",
     buildings: "Byggnader", footprint: "Byggnadsarea", floor: "Våningsarea", levels: "Våningar", assumed: "(antaget)",
     osmLink: "Visa i OpenStreetMap ↗", million: "milj.",
+    svHint: "Zooma in och klicka på en gata för gatuvy mot närmaste byggnad.", svOpen: "Öppna i Google Maps ↗", svClose: "Stäng",
+    svNone: (m) => `Ingen byggnad med materialtagg inom ${m} m – klicka närmare en färgad byggnad.`,
+    svNote: (m) => `${m} m bort · konen visar startriktningen. Klicka på en annan byggnad för att rikta om.`,
     footer: `Våningsarea = byggnadsarea × antal våningar (<code>building:levels</code>); saknas uppgiften antas 2 våningar.
       Data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-bidragsgivare via Overpass API.
       Taggningen är ofullständig – siffrorna visar vad som är kartlagt, inte hela beståndet.`,
@@ -216,6 +243,9 @@ const I18N = {
     rest: (n) => `Other (${n})`, other: "Other", none: "No buildings with this tag.",
     buildings: "Buildings", footprint: "Footprint area", floor: "Floor area", levels: "Levels", assumed: "(assumed)",
     osmLink: "View in OpenStreetMap ↗", million: "million",
+    svHint: "Zoom in and click a street for a street view of the nearest building.", svOpen: "Open in Google Maps ↗", svClose: "Close",
+    svNone: (m) => `No building with a material tag within ${m} m – click closer to a coloured building.`,
+    svNote: (m) => `${m} m away · the cone shows the initial direction. Click another building to re-aim.`,
     footer: `Floor area = footprint × number of levels (<code>building:levels</code>); 2 levels are assumed when the tag is missing.
       Data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors via the Overpass API.
       Tagging is incomplete – the figures show what has been mapped, not the whole building stock.`,
@@ -467,6 +497,7 @@ function render() {
   bars($("types"), topN(tally(inFilter, (p) => p.type), 8), { name: typeLabel, color: () => "var(--seq)" });
   renderCompare();
   updateMap();
+  if (sv.pos) showStreetView(sv.pos, sv.target);
 }
 $("reset").onclick = () => {
   state.material = null;
@@ -478,11 +509,14 @@ const dark = matchMedia("(prefers-color-scheme: dark)").matches;
 let map = null;
 let mapReady = false;
 
-function centroid(geom) {
-  if (geom.type === "Point") return geom.coordinates;
-  const ring = geom.type === "Polygon" ? geom.coordinates[0] : geom.coordinates[0][0];
+const outerRing = (geom) => (geom.type === "Polygon" ? geom.coordinates[0] : geom.coordinates[0][0]);
+/** Vertex average of the outer ring, cached on the feature. */
+function centroid(f) {
+  if (f.center) return f.center;
+  if (f.geometry.type === "Point") return (f.center = f.geometry.coordinates);
+  const ring = outerRing(f.geometry);
   const n = ring.length - 1;
-  return [0, 1].map((i) => ring.slice(0, n).reduce((s, c) => s + c[i], 0) / n);
+  return (f.center = [0, 1].map((i) => ring.slice(0, n).reduce((s, c) => s + c[i], 0) / n));
 }
 
 function colorExpr() {
@@ -512,7 +546,7 @@ function fitCountry() {
   const features = selectedFeatures();
   if (!map || !features.length) return;
   const b = new maplibregl.LngLatBounds();
-  for (const f of features) b.extend(centroid(f.geometry));
+  for (const f of features) b.extend(centroid(f));
   map.fitBounds(b, { padding: 40, duration: 900 });
 }
 
@@ -526,6 +560,87 @@ function popupHtml(p) {
     <div><span>${T.footprint}</span><span>${nf.format(p.footprint_m2)} m²</span></div>
     <div><span>${T.floor}</span><span>${nf.format(p.floor_area_m2)} m²</span></div>
     <a href="https://www.openstreetmap.org/${esc(p.osm_id)}" target="_blank" rel="noopener">${T.osmLink}</a></div>`;
+}
+
+// ---- street view ------------------------------------------------------------------------------
+const SV_RANGE_M = 250;
+const SV_FOV = 90; // Google's embedded viewer opens at roughly this horizontal field of view
+const sv = { pos: null, target: null };
+
+/** Metres east/north from a to b on a local flat projection; fine at street scale. */
+function offsetM(a, b) {
+  return [(b[0] - a[0]) * 111320 * Math.cos((a[1] * Math.PI) / 180), (b[1] - a[1]) * 110540];
+}
+const distM = (a, b) => Math.hypot(...offsetM(a, b));
+const bearing = (a, b) => ((Math.atan2(...offsetM(a, b)) * 180) / Math.PI + 360) % 360;
+function destination(a, deg, m) {
+  const t = (deg * Math.PI) / 180;
+  return [a[0] + (m * Math.sin(t)) / (111320 * Math.cos((a[1] * Math.PI) / 180)), a[1] + (m * Math.cos(t)) / 110540];
+}
+
+/** The building shown on the map whose outline is closest to pos, within SV_RANGE_M. */
+function nearestBuilding(pos) {
+  const nkey = `n:${state.key}`;
+  const box = SV_RANGE_M / 50000; // generous pre-filter in degrees; keeps the vertex loop small
+  let best = null;
+  let bestDist = SV_RANGE_M;
+  for (const f of selectedFeatures()) {
+    const p = f.properties;
+    if (f.geometry.type === "Point" || !(state.material ? p[nkey] === state.material : p[nkey])) continue;
+    const c = centroid(f);
+    if (Math.abs(c[1] - pos[1]) > box || Math.abs(c[0] - pos[0]) > 3 * box) continue;
+    const d = Math.min(...outerRing(f.geometry).map((v) => distM(pos, v)));
+    if (d < bestDist) [best, bestDist] = [f, d];
+  }
+  return best;
+}
+
+function closeStreetView() {
+  sv.pos = sv.target = null;
+  $("sv").hidden = true;
+  $("svFrame").removeAttribute("src");
+  $("stage").classList.remove("split");
+  map.getSource("cone").setData({ type: "FeatureCollection", features: [] });
+  map.setFilter("target", ["==", ["get", "osm_id"], ""]);
+  map.resize();
+}
+
+/** Opens (or re-aims) the street view at pos, looking at the target building, and draws the view cone. */
+function showStreetView(pos, target) {
+  const moved = sv.pos !== pos || sv.target !== target;
+  Object.assign(sv, { pos, target });
+  const aim = centroid(target);
+  const heading = bearing(pos, aim);
+  const p = target.properties;
+  const material = p[`n:${state.key}`];
+  $("svTitle").textContent = [p.name ?? typeLabel(p.type), material && label(material)].filter(Boolean).join(" · ");
+  $("svNote").textContent = T.svNote(nf.format(distM(pos, aim)));
+  $("svLink").href = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${pos[1]},${pos[0]}&heading=${heading.toFixed(0)}`;
+  if (!moved) return; // only the language changed
+  // Google's keyless embed; it snaps to the nearest panorama, so the real camera can be a few metres off.
+  $("svFrame").src = `https://www.google.com/maps?layer=c&cbll=${pos[1]},${pos[0]}&cbp=11,${heading.toFixed(1)},0,0,0&output=svembed`;
+  const reach = Math.min(Math.max(distM(pos, aim) * 1.15, 30), SV_RANGE_M * 1.5);
+  const arc = Array.from({ length: 13 }, (_, i) => destination(pos, heading - SV_FOV / 2 + (i * SV_FOV) / 12, reach));
+  map.getSource("cone").setData({
+    type: "FeatureCollection",
+    features: [
+      { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [[pos, ...arc, pos]] } },
+      { type: "Feature", properties: {}, geometry: { type: "Point", coordinates: pos } },
+    ],
+  });
+  map.setFilter("target", ["==", ["get", "osm_id"], p.osm_id]);
+  const opening = $("sv").hidden;
+  $("sv").hidden = false;
+  $("stage").classList.add("split");
+  map.resize();
+  if (opening) map.fitBounds(new maplibregl.LngLatBounds(pos, pos).extend(aim), { padding: 120, maxZoom: Math.max(map.getZoom(), 17.5), duration: 600 });
+}
+$("svClose").onclick = closeStreetView;
+
+function mapHint(text) {
+  $("maphint").textContent = text;
+  clearTimeout(mapHint.timer);
+  mapHint.timer = setTimeout(() => ($("maphint").textContent = T.svHint), 5000);
 }
 
 function initMap() {
@@ -544,7 +659,7 @@ function initMap() {
       type: "geojson",
       data: {
         type: "FeatureCollection",
-        features: ALL.map((f) => ({ type: "Feature", properties: f.properties, geometry: { type: "Point", coordinates: centroid(f.geometry) } })),
+        features: ALL.map((f) => ({ type: "Feature", properties: f.properties, geometry: { type: "Point", coordinates: centroid(f) } })),
       },
     });
     const surface = css("--surface");
@@ -560,10 +675,29 @@ function initMap() {
     });
     map.addLayer({ id: "fill", type: "fill", source: "buildings", minzoom: 12, paint: { "fill-opacity": 0.85 } });
     map.addLayer({ id: "outline", type: "line", source: "buildings", minzoom: 12, paint: { "line-color": surface, "line-width": 1 } });
-    // One handler for both layers, so a building hit by a dot and its polygon opens one popup.
+    const ink = css("--ink");
+    map.addSource("cone", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+    map.addLayer({ id: "target", type: "line", source: "buildings", filter: ["==", ["get", "osm_id"], ""], paint: { "line-color": ink, "line-width": 3 } });
+    map.addLayer({ id: "cone-fill", type: "fill", source: "cone", filter: ["==", ["geometry-type"], "Polygon"], paint: { "fill-color": ink, "fill-opacity": 0.18 } });
+    map.addLayer({ id: "cone-line", type: "line", source: "cone", filter: ["==", ["geometry-type"], "Polygon"], paint: { "line-color": ink, "line-width": 1.5 } });
+    map.addLayer({
+      id: "camera", type: "circle", source: "cone", filter: ["==", ["geometry-type"], "Point"],
+      paint: { "circle-radius": 6, "circle-color": ink, "circle-stroke-color": surface, "circle-stroke-width": 2 },
+    });
+    // One handler for all layers, so a building hit by a dot and its polygon opens one popup.
+    // A building opens its popup (and re-aims an open street view); a street opens the street view.
     map.on("click", (e) => {
+      const pos = e.lngLat.toArray();
       const hit = map.queryRenderedFeatures(e.point, { layers: ["fill", "dots"] })[0];
-      if (hit) new maplibregl.Popup({ maxWidth: "280px" }).setLngLat(e.lngLat).setHTML(popupHtml(hit.properties)).addTo(map);
+      if (hit) {
+        new maplibregl.Popup({ maxWidth: "280px" }).setLngLat(e.lngLat).setHTML(popupHtml(hit.properties)).addTo(map);
+        const target = sv.pos && ALL.find((f) => f.properties.osm_id === hit.properties.osm_id);
+        if (target && target.geometry.type !== "Point") showStreetView(sv.pos, target);
+      } else if (map.getZoom() >= 14) {
+        const target = nearestBuilding(pos);
+        if (target) showStreetView(pos, target);
+        else mapHint(T.svNone(SV_RANGE_M));
+      }
     });
     for (const layer of ["dots", "fill"]) {
       map.on("mouseenter", layer, () => (map.getCanvas().style.cursor = "pointer"));

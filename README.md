@@ -18,6 +18,13 @@ Then open `dashboard.html` in a browser (double-click – no server needed; it
 needs internet for the base map and MapLibre itself). The UI is in Swedish by
 default; switch to English with the SV/EN buttons or `dashboard.html?lang=en`.
 
+Street view: zoom in and click a street. The screen splits in two, with Google
+Street View looking from the clicked point at the nearest tagged building; the
+view cone and the target building are drawn on the map. Click another building
+to re-aim from the same spot. This uses Google's keyless embed (`output=svembed`),
+which is unofficial: the cone shows the initial direction only (the iframe cannot
+report back where you turn), and Google snaps to the nearest panorama.
+
 Data comes live from the Overpass API, so results reflect OSM at fetch time. The
 raw response is cached in `data/raw_<country>.json`.
 
