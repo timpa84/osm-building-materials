@@ -71,8 +71,6 @@ uv run python -m pyright
 uv run python -m pytest
 ```
 
-Data © OpenStreetMap contributors, ODbL.
-
 ## License
 
 Code: MIT, see `LICENSE`. Data: © OpenStreetMap contributors, ODbL 1.0 – the
