@@ -5,6 +5,14 @@ material tag – `building:material`, `building:facade:material`,
 `building:structure` or `roof:material` – and writes one GeoJSON map per country
 plus a MapLibre dashboard with statistics.
 
+> **Status: early test.** An exploratory prototype made within
+> [BEAM ME UP](https://www.sintef.no/en/projects/2026/beam-me-up/), a project in the
+> Driving Urban Transitions (DUT) partnership on better building stock models for
+> circular urban development. It asks a narrow question: how much can
+> crowd-sourced OSM material tags tell us about what buildings are made of? Coverage
+> is well below 1 % of buildings, so treat the numbers as a view of what is mapped,
+> not of the building stock. Not an official project deliverable.
+
 ## Run
 
 ```bash
@@ -64,3 +72,8 @@ uv run python -m pytest
 ```
 
 Data © OpenStreetMap contributors, ODbL.
+
+## License
+
+Code: MIT, see `LICENSE`. Data: © OpenStreetMap contributors, ODbL 1.0 – the
+generated files in `data/` and `dist/` are not part of the repository.
