@@ -4,13 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OSM building materials</title>
+<meta name="description" content="Buildings with material tags in OpenStreetMap in Sweden, Norway, Denmark and France, with a street view of each building.">
+<!-- site:head -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css">
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
-<!-- Data is loaded as scripts (not fetch) so the page works straight from file:// -->
-<script src="data/materials_sweden.js"></script>
-<script src="data/materials_norway.js"></script>
-<script src="data/materials_denmark.js"></script>
-<script src="data/materials_france.js"></script>
+<!-- Data is loaded as scripts (not fetch) so the page works straight from file://. The index and the
+     building centroids come first; building outlines are loaded per area from data/web/chunks/. -->
+<script src="data/web/index.js"></script>
+<script src="data/web/points.js"></script>
 <style>
 :root {
   color-scheme: light;
@@ -43,6 +44,8 @@ body {
 #svHandle:hover, #svHandle:focus-visible { background: var(--muted); outline: none; }
 #stage:not(.split) #svHandle { display: none; }
 #map { height: 100%; }
+.back { display: inline-block; margin-bottom: 12px; font-size: 12px; color: var(--ink-2); text-decoration: none; }
+.back:hover { color: var(--ink); }
 h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
 .titlebar { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .seg.lang { flex: none; padding: 2px; }
@@ -104,6 +107,12 @@ footer a, .maplibregl-popup a { color: var(--seq); }
 }
 .maplibregl-popup-tip { display: none; }
 .pop b { font-size: 13px; display: block; margin-bottom: 4px; }
+.pop .actions { margin-top: 8px; align-items: center; }
+.pop .svbtn {
+  border: 1px solid var(--border); background: var(--wash); color: var(--ink); border-radius: 8px;
+  padding: 4px 10px; cursor: pointer; font: inherit;
+}
+.pop .svbtn:hover { border-color: var(--muted); }
 #maplegend {
   position: absolute; right: 12px; bottom: 28px; z-index: 2; background: var(--surface);
   border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; font-size: 12px;
@@ -114,6 +123,7 @@ footer a, .maplibregl-popup a { color: var(--seq); }
   position: absolute; left: 12px; top: 12px; z-index: 2; max-width: calc(100% - 80px); background: var(--surface);
   border: 1px solid var(--border); border-radius: 10px; padding: 6px 10px; font-size: 12px; color: var(--ink-2);
 }
+#maphint.alert { color: var(--ink); border-color: var(--muted); }
 #sv { display: flex; flex-direction: column; min-height: 0; background: var(--surface); }
 #sv[hidden] { display: none; }
 #sv header { display: flex; align-items: start; gap: 12px; padding: 10px 12px; }
@@ -135,6 +145,7 @@ footer a, .maplibregl-popup a { color: var(--seq); }
 <body>
 <aside id="side">
   <header>
+    <!-- site:back -->
     <div class="titlebar">
       <h1 data-t="title"></h1>
       <div class="seg lang" id="lang" role="group" aria-label="Language"></div>
@@ -167,7 +178,7 @@ footer a, .maplibregl-popup a { color: var(--seq); }
   <footer id="footer"></footer>
 </aside>
 <div id="stage">
-  <div id="mapwrap"><div id="map"></div><div id="maphint" data-t="svHint"></div><div id="maplegend"></div></div>
+  <div id="mapwrap"><div id="map"></div><div id="maphint" role="status" aria-live="polite"></div><div id="maplegend"></div></div>
   <div id="svHandle" role="separator" tabindex="0"></div>
   <section id="sv" hidden>
     <header>
@@ -200,14 +211,21 @@ const I18N = {
     cmpTitle: "Jämförelse mellan länderna", cmpHint: (measure, key) => `Andel av ${measure.toLowerCase()} per material · ${key.toLowerCase()}`,
     rest: (n) => `Övriga (${n})`, other: "Övriga", none: "Inga byggnader med den här taggen.",
     buildings: "Byggnader", footprint: "Byggnadsarea", floor: "Våningsarea", levels: "Våningar", assumed: "(antaget)",
-    osmLink: "Visa i OpenStreetMap ↗", million: "milj.",
-    svHint: "Zooma in och klicka på en gata för gatuvy mot närmaste byggnad.", svOpen: "Öppna i Google Maps ↗", svClose: "Stäng", svResize: "Ändra storlek på karta och gatuvy",
-    svNone: (m) => `Ingen byggnad med materialtagg inom ${m} m – klicka närmare en färgad byggnad.`,
-    svNote: (m) => `${m} m bort · konen visar startriktningen. Klicka på en annan byggnad för att rikta om.`,
-    footer: `Våningsarea = byggnadsarea × antal våningar (<code>building:levels</code>); saknas uppgiften antas 2 våningar.
-      Data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-bidragsgivare via Overpass API.
-      Taggningen är ofullständig – siffrorna visar vad som är kartlagt, inte hela beståndet.`,
-    noData: "<h1>Ingen data hittades</h1><p class=\"sub\">Kör <code>uv run python osm_materials.py</code> för att skapa <code>data/materials_*.js</code> och ladda om sidan.</p>",
+    osmLink: "Visa i OpenStreetMap ↗", million: "milj.", loading: "Laddar byggnader …",
+    svHint: "Klicka på en byggnad för detaljer och gatuvy, eller på en gata för att ställa dig där.",
+    svOpen: "Öppna i Google Maps ↗", svClose: "Stäng", svResize: "Ändra storlek på karta och gatuvy", svShow: "Visa i gatuvy",
+    svZoom: "Zooma in närmare för att välja en plats på gatan.",
+    svNoStreet: (m) => `Ingen gata inom ${m} m. Gatubilder finns bara längs gator – klicka på en gata.`,
+    svNoBuilding: (m) => `Ingen byggnad med materialtagg inom ${m} m från gatan – klicka närmare en färgad byggnad.`,
+    svNoViewpoint: (m) => `Byggnaden syns inte från någon gata inom ${m} m, så det finns ingen gatuvy att visa.`,
+    svHidden: "Ingen byggnad med materialtagg syns härifrån – andra hus skymmer. Prova en annan plats på gatan.",
+    svNotFromHere: "Byggnaden syns inte från kamerans plats. Välj ”Visa i gatuvy” i rutan för att flytta kameran.",
+    svNote: (m, moved) => `${m} m bort${moved ? ` · kameran flyttad ${moved} m till närmaste gata` : ""} · konen visar startriktningen. Klicka på en annan byggnad för att rikta om.`,
+    footer: (fetched) => `Våningsarea = byggnadsarea × antal våningar (<code>building:levels</code>); saknas uppgiften antas 2 våningar.
+      Data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-bidragsgivare via Overpass API, hämtad ${fetched}.
+      Taggningen är ofullständig – siffrorna visar vad som är kartlagt, inte hela beståndet.
+      Gatuvyn är Google Street View: kameran ställs på närmaste gata och Google visar närmaste panorama därifrån.`,
+    noData: "<h1>Ingen data hittades</h1><p class=\"sub\">Kör <code>uv run python osm_materials.py --web</code> för att skapa <code>data/web/</code> och ladda om sidan.</p>",
     noMap: "Kartan kräver internetanslutning (MapLibre laddas från CDN).",
     materials: {
       wood: "Trä", brick: "Tegel", concrete: "Betong", plaster: "Puts", metal: "Metall", stone: "Sten",
@@ -247,14 +265,21 @@ const I18N = {
     cmpTitle: "Country comparison", cmpHint: (measure, key) => `Share of ${measure.toLowerCase()} per material · ${key.toLowerCase()}`,
     rest: (n) => `Other (${n})`, other: "Other", none: "No buildings with this tag.",
     buildings: "Buildings", footprint: "Footprint area", floor: "Floor area", levels: "Levels", assumed: "(assumed)",
-    osmLink: "View in OpenStreetMap ↗", million: "million",
-    svHint: "Zoom in and click a street for a street view of the nearest building.", svOpen: "Open in Google Maps ↗", svClose: "Close", svResize: "Resize map and street view",
-    svNone: (m) => `No building with a material tag within ${m} m – click closer to a coloured building.`,
-    svNote: (m) => `${m} m away · the cone shows the initial direction. Click another building to re-aim.`,
-    footer: `Floor area = footprint × number of levels (<code>building:levels</code>); 2 levels are assumed when the tag is missing.
-      Data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors via the Overpass API.
-      Tagging is incomplete – the figures show what has been mapped, not the whole building stock.`,
-    noData: "<h1>No data found</h1><p class=\"sub\">Run <code>uv run python osm_materials.py</code> to create <code>data/materials_*.js</code>, then reload.</p>",
+    osmLink: "View in OpenStreetMap ↗", million: "million", loading: "Loading buildings …",
+    svHint: "Click a building for details and street view, or click a street to stand there.",
+    svOpen: "Open in Google Maps ↗", svClose: "Close", svResize: "Resize map and street view", svShow: "Show in street view",
+    svZoom: "Zoom in closer to pick a spot on the street.",
+    svNoStreet: (m) => `No street within ${m} m. Street view only exists along streets – click a street.`,
+    svNoBuilding: (m) => `No building with a material tag within ${m} m of the street – click closer to a coloured building.`,
+    svNoViewpoint: (m) => `The building cannot be seen from any street within ${m} m, so there is no street view to show.`,
+    svHidden: "No building with a material tag can be seen from here – other buildings are in the way. Try another spot on the street.",
+    svNotFromHere: "The building cannot be seen from the camera. Choose “Show in street view” in the popup to move the camera.",
+    svNote: (m, moved) => `${m} m away${moved ? ` · camera moved ${moved} m to the nearest street` : ""} · the cone shows the initial direction. Click another building to re-aim.`,
+    footer: (fetched) => `Floor area = footprint × number of levels (<code>building:levels</code>); 2 levels are assumed when the tag is missing.
+      Data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors via the Overpass API, fetched ${fetched}.
+      Tagging is incomplete – the figures show what has been mapped, not the whole building stock.
+      Street view is Google Street View: the camera is placed on the nearest street and Google shows the nearest panorama from there.`,
+    noData: "<h1>No data found</h1><p class=\"sub\">Run <code>uv run python osm_materials.py --web</code> to create <code>data/web/</code>, then reload.</p>",
     noMap: "The map needs an internet connection (MapLibre is loaded from a CDN).",
     materials: {
       roof_tiles: "Roof tiles", tar_paper: "Tar paper", reinforced_concrete: "Reinforced concrete",
@@ -268,7 +293,8 @@ const I18N = {
     },
   },
 };
-const MEASURES = { count: () => 1, footprint: (p) => p.footprint_m2, floor: (p) => p.floor_area_m2 };
+// Stats are summed over pre-aggregated rows: each row stands for `count` buildings with identical attributes.
+const MEASURES = { count: (r) => r.count, footprint: (r) => r.footprint_m2, floor: (r) => r.floor_area_m2 };
 // Colour follows the material, never its rank; everything else folds into "Other".
 // The order is the palette's validated slot order (adjacent pairs stay colour-blind safe in stacks).
 const COLORED = ["concrete", "roof_tiles", "tar_paper", "wood", "plaster", "glass", "metal", "brick"];
@@ -283,13 +309,12 @@ let T = I18N[state.lang];
 const $ = (id) => document.getElementById(id);
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-const normalize = (v) => v.split(/[;,/]/)[0].trim().toLowerCase().replaceAll(" ", "_");
 const group = (m) => (COLORED.includes(m) ? m : "other");
 const humanize = (s) => (s.charAt(0).toUpperCase() + s.slice(1)).replaceAll("_", " ");
 const label = (m) => T.materials[m] ?? humanize(m);
 const typeLabel = (t) => T.types[t] ?? humanize(t);
 const groupLabel = (g) => (g === "other" ? T.other : label(g));
-let nf, dec, pctf, pctf1;
+let nf, dec, pctf, pctf1, pctf2;
 function setLang(lang) {
   state.lang = lang;
   T = I18N[lang];
@@ -298,46 +323,70 @@ function setLang(lang) {
   dec = new Intl.NumberFormat(T.locale, { maximumFractionDigits: 1 });
   pctf = new Intl.NumberFormat(T.locale, { style: "percent", maximumFractionDigits: 0 });
   pctf1 = new Intl.NumberFormat(T.locale, { style: "percent", maximumFractionDigits: 1 });
+  pctf2 = new Intl.NumberFormat(T.locale, { style: "percent", maximumFractionDigits: 2 });
   for (const el of document.querySelectorAll("[data-t]")) el.textContent = T[el.dataset.t];
-  $("footer").innerHTML = T.footer;
+  if (WEB) $("footer").innerHTML = T.footer(WEB.fetched);
   for (const [id, key] of Object.entries({ country: "country", key: "key", measure: "measure" })) $(id).setAttribute("aria-label", T.groups[key]);
   $("svHandle").setAttribute("aria-label", T.svResize);
+  paintHint();
 }
-const pct = (x) => (x < 0.1 ? pctf1 : pctf).format(x);
+const pct = (x) => (x < 0.01 ? pctf2 : x < 0.1 ? pctf1 : pctf).format(x);
 const compact = (v) => (v >= 1e6 ? `${dec.format(v / 1e6)} ${T.million}` : nf.format(v));
 const fmt = (v) => (state.measure === "count" ? nf.format(v) : `${compact(v)} m²`);
 
 // ---- data -------------------------------------------------------------------------------------
-const DATA = window.OSM_MATERIALS ?? {};
-for (const [country, fc] of Object.entries(DATA)) {
-  for (const f of fc.features) {
-    const p = f.properties;
-    p.country = country;
-    p.type = p.building && p.building !== "no" ? p.building : "part";
-    for (const key of Object.keys(I18N.sv.keys)) if (p[key]) p[`n:${key}`] = normalize(p[key]);
-  }
-}
-const ALL = Object.values(DATA).flatMap((fc) => fc.features);
-/** Features and OSM building total of the selected country, or of all countries. */
-const selectedFeatures = () => (state.country === "all" ? ALL : DATA[state.country].features);
+// data/web/index.js: per-country totals, dictionaries, aggregated stats rows and the chunk list.
+const WEB = window.OSM_WEB ?? null;
+/** Stats rows [country, type, ...code per key, assumed, count, footprint, floor] as objects like a feature's properties. */
+const ROWS = (WEB?.stats ?? []).map((row) => {
+  const n = WEB.keys.length;
+  const [assumed, count, footprint, floor] = row.slice(2 + n);
+  const r = { country: WEB.countries[row[0]], type: WEB.types[row[1]], levels_assumed: assumed === 1, count, footprint_m2: footprint, floor_area_m2: floor };
+  row.slice(2, 2 + n).forEach((c, j) => c && (r[`n:${WEB.keys[j]}`] = WEB.materials[c - 1]));
+  return r;
+});
+const ROWS_OF = Object.fromEntries((WEB?.countries ?? []).map((c) => [c, ROWS.filter((r) => r.country === c)]));
+const selectedRows = () => (state.country === "all" ? ROWS : ROWS_OF[state.country]);
 const selectedTotal = () =>
-  state.country === "all" ? Object.values(DATA).reduce((s, fc) => s + fc.total_buildings, 0) : DATA[state.country].total_buildings;
+  state.country === "all" ? WEB.countries.reduce((s, c) => s + WEB.country[c].total_buildings, 0) : WEB.country[state.country].total_buildings;
+
+/** data/web/points.js: one centroid per building, delta-encoded in 1e-5 degrees, with a material code per key. */
+function centroidFeatures() {
+  const out = [];
+  for (const country of WEB.countries) {
+    const P = window.OSM_POINTS[country];
+    let x = 0;
+    let y = 0;
+    for (let i = 0; i < P.lon.length; i++) {
+      x += P.lon[i];
+      y += P.lat[i];
+      const properties = { country };
+      WEB.keys.forEach((k, j) => {
+        const c = P[`c${j}`][i];
+        if (c) properties[`n:${k}`] = WEB.materials[c - 1];
+      });
+      out.push({ type: "Feature", properties, geometry: { type: "Point", coordinates: [x / 1e5, y / 1e5] } });
+    }
+  }
+  return out;
+}
 
 /** Sum of the current measure per category, largest first. */
-function tally(features, category) {
+function tally(rows, category) {
   const get = MEASURES[state.measure];
   const sums = new Map();
-  for (const { properties: p } of features) {
-    const c = category(p);
+  for (const r of rows) {
+    const c = category(r);
     if (c === undefined) continue;
     const row = sums.get(c) ?? sums.set(c, { id: c, value: 0, count: 0, footprint: 0, floor: 0 }).get(c);
-    row.value += get(p);
-    row.count += 1;
-    row.footprint += p.footprint_m2;
-    row.floor += p.floor_area_m2;
+    row.value += get(r);
+    row.count += r.count;
+    row.footprint += r.footprint_m2;
+    row.floor += r.floor_area_m2;
   }
   return [...sums.values()].sort((a, b) => b.value - a.value);
 }
+const countOf = (rows) => rows.reduce((s, r) => s + r.count, 0);
 
 /** Top n rows, the rest folded into one "Other" row. */
 function topN(rows, n, keep = null) {
@@ -368,7 +417,7 @@ function segmented(el, options, prop, onChange) {
   for (const b of el.children) {
     b.textContent = options[b.dataset.id];
     b.setAttribute("aria-pressed", String(state[prop] === b.dataset.id));
-    b.disabled = prop === "country" && b.dataset.id !== "all" && !DATA[b.dataset.id];
+    b.disabled = prop === "country" && b.dataset.id !== "all" && !WEB.country[b.dataset.id];
   }
 }
 
@@ -408,20 +457,21 @@ function bars(el, rows, { name, color, onClick, selected }) {
   if (!rows.length) el.innerHTML = `<p class="hint">${T.none}</p>`;
 }
 
-function renderKpis(features, tagged) {
+function renderKpis(rows, tagged) {
   const total = selectedTotal();
-  const sum = (list, get) => list.reduce((s, f) => s + get(f.properties), 0);
-  const assumed = tagged.filter((f) => f.properties.levels_assumed).length;
+  const sum = (list, get) => list.reduce((s, r) => s + get(r), 0);
+  const n = countOf(tagged);
+  const assumed = countOf(tagged.filter((r) => r.levels_assumed));
   // total_buildings counts building=* only, so building:part-only objects are reported separately.
-  const whole = features.filter((f) => f.properties.type !== "part").length;
+  const whole = countOf(rows.filter((r) => r.type !== "part"));
   const tiles = [
-    [T.kpiTagged, nf.format(whole), T.kpiOf(pct(whole / total), compact(total), nf.format(features.length - whole))],
-    [T.kpiWithKey(T.keys[state.key]), nf.format(tagged.length), state.key],
-    [T.kpiFootprint, `${compact(sum(tagged, (p) => p.footprint_m2))} m²`, T.kpiFootprintNote],
-    [T.kpiFloor, `${compact(sum(tagged, (p) => p.floor_area_m2))} m²`, tagged.length ? T.kpiAssumed(pct(assumed / tagged.length)) : ""],
+    [T.kpiTagged, nf.format(whole), T.kpiOf(pct(whole / total), compact(total), nf.format(countOf(rows) - whole))],
+    [T.kpiWithKey(T.keys[state.key]), nf.format(n), state.key],
+    [T.kpiFootprint, `${compact(sum(tagged, (r) => r.footprint_m2))} m²`, T.kpiFootprintNote],
+    [T.kpiFloor, `${compact(sum(tagged, (r) => r.floor_area_m2))} m²`, n ? T.kpiAssumed(pct(assumed / n)) : ""],
   ];
   $("kpis").innerHTML = tiles
-    .map(([l, v, n]) => `<div class="kpi"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`)
+    .map(([l, v, note]) => `<div class="kpi"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${note}</div></div>`)
     .join("");
 }
 
@@ -429,8 +479,8 @@ function renderCompare() {
   const nkey = `n:${state.key}`;
   $("compare").innerHTML = "";
   for (const [country, name] of Object.entries(T.countries)) {
-    if (!DATA[country]) continue;
-    const rows = tally(DATA[country].features, (p) => (p[nkey] ? group(p[nkey]) : undefined));
+    if (!WEB.country[country]) continue;
+    const rows = tally(ROWS_OF[country], (r) => (r[nkey] ? group(r[nkey]) : undefined));
     const total = rows.reduce((s, r) => s + r.value, 0);
     const other = rows.find((x) => x.id === "other") ?? { id: "other", value: 0, count: 0, footprint: 0, floor: 0 };
     for (const r of rows) {
@@ -464,7 +514,7 @@ function render() {
   segmented($("lang"), { sv: "SV", en: "EN" }, "lang", () => {
     setLang(state.lang);
     try {
-      history.replaceState(null, "", `?lang=${state.lang}`);
+      history.replaceState(null, "", `?lang=${state.lang}${location.hash}`);
     } catch {
       // Some browsers refuse to rewrite file:// URLs; the language switch works without it.
     }
@@ -482,12 +532,12 @@ function render() {
   segmented($("measure"), T.measures, "measure", render);
 
   const nkey = `n:${state.key}`;
-  const features = selectedFeatures();
-  const tagged = features.filter((f) => f.properties[nkey]);
-  renderKpis(features, tagged);
+  const rows = selectedRows();
+  const tagged = rows.filter((r) => r[nkey]);
+  renderKpis(rows, tagged);
 
   $("matTitle").textContent = T.matTitle(T.keys[state.key], T.measures[state.measure]);
-  bars($("materials"), topN(tally(tagged, (p) => p[nkey]), 10, state.material), {
+  bars($("materials"), topN(tally(tagged, (r) => r[nkey]), 10, state.material), {
     name: label,
     color: (id) => `var(--m-${group(id)})`,
     selected: state.material,
@@ -498,12 +548,12 @@ function render() {
   });
   $("reset").hidden = !state.material;
 
-  const inFilter = state.material ? tagged.filter((f) => f.properties[nkey] === state.material) : tagged;
+  const inFilter = state.material ? tagged.filter((r) => r[nkey] === state.material) : tagged;
   $("typeHint").textContent = state.material ? T.typeWith(label(state.material)) : T.typeAll;
-  bars($("types"), topN(tally(inFilter, (p) => p.type), 8), { name: typeLabel, color: () => "var(--seq)" });
+  bars($("types"), topN(tally(inFilter, (r) => r.type), 8), { name: typeLabel, color: () => "var(--seq)" });
   renderCompare();
   updateMap();
-  if (sv.pos) showStreetView(sv.pos, sv.target);
+  if (sv.pos) svHeader();
 }
 $("reset").onclick = () => {
   state.material = null;
@@ -512,6 +562,7 @@ $("reset").onclick = () => {
 
 // ---- map --------------------------------------------------------------------------------------
 const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 let map = null;
 let mapReady = false;
 
@@ -531,6 +582,12 @@ function colorExpr() {
   return [...expr, css("--m-other")];
 }
 
+/** The selection filter, shared by the map layers and the street-view building search. */
+function inSelection(p) {
+  const nkey = `n:${state.key}`;
+  return (state.material ? p[nkey] === state.material : Boolean(p[nkey])) && (state.country === "all" || p.country === state.country);
+}
+
 function updateMap() {
   if (!mapReady) return;
   const nkey = `n:${state.key}`;
@@ -539,20 +596,21 @@ function updateMap() {
   for (const layer of ["dots", "fill", "outline"]) map.setFilter(layer, filter);
   map.setPaintProperty("dots", "circle-color", colorExpr());
   map.setPaintProperty("fill", "fill-color", colorExpr());
-  const present = new Set(
-    selectedFeatures().map((f) => f.properties[nkey]).filter(Boolean).map(group),
-  );
+  const present = new Set(selectedRows().map((r) => r[nkey]).filter(Boolean).map(group));
   $("maplegend").innerHTML = [...COLORED, "other"]
     .filter((id) => present.has(id))
     .map((id) => `<span><i class="sw" style="background:var(--m-${id})"></i>${esc(groupLabel(id))}</span>`)
     .join("");
+  syncChunks();
 }
 
 function fitCountry() {
-  const features = selectedFeatures();
-  if (!map || !features.length) return;
+  if (!map) return;
   const b = new maplibregl.LngLatBounds();
-  for (const f of features) b.extend(centroid(f));
+  for (const c of state.country === "all" ? WEB.countries : [state.country]) {
+    const [w, s, e, n] = WEB.country[c].bbox;
+    b.extend([w, s]).extend([e, n]);
+  }
   map.fitBounds(b, { padding: 40, duration: 900 });
 }
 
@@ -565,44 +623,358 @@ function popupHtml(p) {
     <div><span>${T.levels}</span><span>${dec.format(p.levels)}${p.levels_assumed ? ` ${T.assumed}` : ""}</span></div>
     <div><span>${T.footprint}</span><span>${nf.format(p.footprint_m2)} m²</span></div>
     <div><span>${T.floor}</span><span>${nf.format(p.floor_area_m2)} m²</span></div>
-    <a href="https://www.openstreetmap.org/${esc(p.osm_id)}" target="_blank" rel="noopener">${T.osmLink}</a></div>`;
+    <div class="actions"><button class="svbtn" type="button">${T.svShow}</button>
+    <a href="https://www.openstreetmap.org/${esc(p.osm_id)}" target="_blank" rel="noopener">${T.osmLink}</a></div></div>`;
 }
 
-// ---- street view ------------------------------------------------------------------------------
-const SV_RANGE_M = 250;
-const SV_FOV = 90; // Google's embedded viewer opens at roughly this horizontal field of view
-const sv = { pos: null, target: null };
+// ---- building outlines, loaded per area -------------------------------------------------------
+const CHUNK_ZOOM = 11.5; // outlines are drawn from zoom 12; start loading just before
+const CHUNK_CACHE = 24; // chunks kept in memory (about 3000 buildings each)
+const CHUNKS = (WEB?.chunks ?? []).map(([id, w, s, e, n]) => ({
+  id, country: id.slice(0, id.lastIndexOf("-")), bbox: [w, s, e, n], features: null, promise: null, used: 0,
+}));
+const byId = new Map(); // osm_id -> loaded feature
+const chunkWaiters = new Map();
+window.OSM_CHUNK = (id, fc) => chunkWaiters.get(id)?.(fc);
+let loadingChunks = 0;
+
+const overlaps = (a, b) => a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3];
+const chunksIn = (bbox) => CHUNKS.filter((c) => overlaps(c.bbox, bbox) && (state.country === "all" || c.country === state.country));
+
+/** Loads one chunk script (once); resolves with its features. */
+function loadChunk(c) {
+  c.used = performance.now();
+  if (c.features) return Promise.resolve(c.features);
+  if (!c.promise) {
+    loadingChunks += 1;
+    paintHint();
+    c.promise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      const done = (fc) => {
+        chunkWaiters.delete(c.id);
+        script.remove();
+        if (fc) resolve(fc);
+        else reject(new Error(`Could not load chunk ${c.id}`));
+      };
+      chunkWaiters.set(c.id, done);
+      script.onerror = () => done(null);
+      script.onload = () => chunkWaiters.has(c.id) && done(null); // loaded but never called OSM_CHUNK
+      script.src = `data/web/chunks/${c.id}.js`;
+      document.head.append(script);
+    })
+      .then((fc) => {
+        c.features = fc.features;
+        for (const f of c.features) byId.set(f.properties.osm_id, f);
+        return c.features;
+      })
+      .finally(() => {
+        c.promise = null;
+        loadingChunks -= 1;
+        paintHint();
+      });
+  }
+  return c.promise;
+}
+
+/** Drops the least recently used chunks beyond CHUNK_CACHE, except those in keep. */
+function evictChunks(keep) {
+  const loaded = CHUNKS.filter((c) => c.features).sort((a, b) => a.used - b.used);
+  for (const c of loaded.slice(0, Math.max(0, loaded.length - CHUNK_CACHE))) {
+    if (keep.includes(c) || c.features.includes(sv.target)) continue;
+    for (const f of c.features) if (byId.get(f.properties.osm_id) === f) byId.delete(f.properties.osm_id);
+    c.features = null;
+  }
+}
+
+let shownChunks = "";
+let syncSeq = 0;
+/** Puts the outlines of the chunks around the view into the map's building source. */
+async function syncChunks() {
+  if (!mapReady || map.getZoom() < CHUNK_ZOOM) return;
+  const seq = ++syncSeq;
+  const b = map.getBounds();
+  const [dx, dy] = [(b.getEast() - b.getWest()) / 4, (b.getNorth() - b.getSouth()) / 4];
+  const wanted = chunksIn([b.getWest() - dx, b.getSouth() - dy, b.getEast() + dx, b.getNorth() + dy]);
+  const own = sv.target && CHUNKS.find((c) => c.features?.includes(sv.target)); // keeps the target outlined
+  if (own && !wanted.includes(own)) wanted.push(own);
+  await Promise.allSettled(wanted.map(loadChunk));
+  if (seq !== syncSeq) return; // a newer view took over
+  const ids = wanted.filter((c) => c.features).map((c) => c.id).join();
+  if (ids !== shownChunks) {
+    shownChunks = ids;
+    map.getSource("buildings").setData({ type: "FeatureCollection", features: wanted.flatMap((c) => c.features ?? []) });
+  }
+  evictChunks(wanted);
+}
 
 /** Metres east/north from a to b on a local flat projection; fine at street scale. */
 function offsetM(a, b) {
   return [(b[0] - a[0]) * 111320 * Math.cos((a[1] * Math.PI) / 180), (b[1] - a[1]) * 110540];
 }
+/** The point x metres east and y metres north of a. */
+const fromOffset = (a, x, y) => [a[0] + x / (111320 * Math.cos((a[1] * Math.PI) / 180)), a[1] + y / 110540];
 const distM = (a, b) => Math.hypot(...offsetM(a, b));
-const bearing = (a, b) => ((Math.atan2(...offsetM(a, b)) * 180) / Math.PI + 360) % 360;
 function destination(a, deg, m) {
   const t = (deg * Math.PI) / 180;
-  return [a[0] + (m * Math.sin(t)) / (111320 * Math.cos((a[1] * Math.PI) / 180)), a[1] + (m * Math.cos(t)) / 110540];
+  return fromOffset(a, m * Math.sin(t), m * Math.cos(t));
+}
+/** Bounding box [w, s, e, n] of everything within m metres of pos. */
+const around = (pos, m) => [...fromOffset(pos, -m, -m), ...fromOffset(pos, m, m)];
+const outline = (f) => (f.geometry.type === "Point" ? [f.geometry.coordinates] : outerRing(f.geometry));
+
+// ---- plane geometry in local metres [east, north] -------------------------------------------
+/** Compass bearing in degrees from a to b. */
+const bearingM = (a, b) => ((Math.atan2(b[0] - a[0], b[1] - a[1]) * 180) / Math.PI + 360) % 360;
+const bboxOf = (pts) =>
+  pts.reduce(([w, s, e, n], [x, y]) => [Math.min(w, x), Math.min(s, y), Math.max(e, x), Math.max(n, y)], [Infinity, Infinity, -Infinity, -Infinity]);
+const mean = (ring) => [0, 1].map((i) => ring.reduce((s, v) => s + v[i], 0) / ring.length);
+const lines = (g) => (g.type === "LineString" ? [g.coordinates] : g.type === "MultiLineString" ? g.coordinates : []);
+const rings = (g) => (g.type === "Polygon" ? g.coordinates : g.type === "MultiPolygon" ? g.coordinates.flat() : []);
+/** Closest point to the origin on segment a-b: [x, y, distance]. */
+function closestOnSegment(a, b) {
+  const [dx, dy] = [b[0] - a[0], b[1] - a[1]];
+  const len2 = dx * dx + dy * dy;
+  const t = len2 ? Math.min(Math.max(-(a[0] * dx + a[1] * dy) / len2, 0), 1) : 0;
+  const [x, y] = [a[0] + t * dx, a[1] + t * dy];
+  return [x, y, Math.hypot(x, y)];
+}
+/** Distance from p to the nearest edge of a ring (or to a single point). */
+function ringDist(p, ring) {
+  const rel = (v) => [v[0] - p[0], v[1] - p[1]];
+  if (ring.length === 1) return Math.hypot(...rel(ring[0]));
+  let best = Infinity;
+  for (let i = 1; i < ring.length; i++) best = Math.min(best, closestOnSegment(rel(ring[i - 1]), rel(ring[i]))[2]);
+  return best;
+}
+/** Ray-casting point-in-polygon test for one ring. */
+function inRing([x, y], ring) {
+  let inside = false;
+  for (let i = 1; i < ring.length; i++) {
+    const [[x1, y1], [x2, y2]] = [ring[i - 1], ring[i]];
+    if (y1 > y !== y2 > y && x < x1 + ((y - y1) * (x2 - x1)) / (y2 - y1)) inside = !inside;
+  }
+  return inside;
+}
+/** Fraction t of the way from p to q where the segment first crosses an edge of ring, or null. */
+function firstCrossing(p, q, ring) {
+  const [rx, ry] = [q[0] - p[0], q[1] - p[1]];
+  let first = null;
+  for (let i = 1; i < ring.length; i++) {
+    const [a, b] = [ring[i - 1], ring[i]];
+    const [sx, sy] = [b[0] - a[0], b[1] - a[1]];
+    const den = rx * sy - ry * sx;
+    if (!den) continue;
+    const [ax, ay] = [a[0] - p[0], a[1] - p[1]];
+    const t = (ax * sy - ay * sx) / den;
+    const u = (ax * ry - ay * rx) / den;
+    if (t >= 0 && t <= 1 && u >= 0 && u <= 1 && (first === null || t < first)) first = t;
+  }
+  return first;
+}
+/** Points every `step` metres along a polyline, its vertices included. */
+function* along(line, step) {
+  for (let i = 1; i < line.length; i++) {
+    const [a, b] = [line[i - 1], line[i]];
+    const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / step));
+    for (let k = 0; k < n; k++) yield [a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n];
+  }
+  if (line.length) yield line[line.length - 1];
 }
 
-/** The building shown on the map whose outline is closest to pos, within SV_RANGE_M. */
-function nearestBuilding(pos) {
-  const nkey = `n:${state.key}`;
-  const box = SV_RANGE_M / 50000; // generous pre-filter in degrees; keeps the vertex loop small
-  let best = null;
-  let bestDist = SV_RANGE_M;
-  for (const f of selectedFeatures()) {
-    const p = f.properties;
-    if (f.geometry.type === "Point" || !(state.material ? p[nkey] === state.material : p[nkey])) continue;
-    const c = centroid(f);
-    if (Math.abs(c[1] - pos[1]) > box || Math.abs(c[0] - pos[0]) > 3 * box) continue;
-    const d = Math.min(...outerRing(f.geometry).map((v) => distM(pos, v)));
-    if (d < bestDist) [best, bestDist] = [f, d];
+// ---- street view ------------------------------------------------------------------------------
+// Google's keyless embed shows the panorama nearest the point it is given, and panoramas are taken along
+// streets. So the camera always stands on a street of the base map, at a spot from which the building can
+// be seen: other buildings (with their heights) are checked along each line of sight. Where no street
+// sees the building, no image is shown, rather than a panorama of something else.
+const SV_MIN_ZOOM = 14; // the base map has every street and building from zoom 14
+const SV_SNAP_M = 30; // a click this close to a street stands on it
+const SV_VIEWPOINT_M = 60; // "Show in street view" looks for a street this close to the building
+const SV_RANGE_M = 150; // farthest building a street click aims at; beyond this it is too small to see
+const SV_FOV = 90; // Google's embedded viewer opens at roughly this horizontal field of view
+const CAMERA_M = 2.5; // height of a Street View camera
+const SNAP_MS = 450; // camera slide from the clicked point to the street
+const sv = { pos: null, target: null, heading: 0, dist: 0, moved: 0 };
+let svSeq = 0; // bumped by every street-view request and by closing, so a request still waiting gives up
+
+/**
+ * Extra metres added to a street's distance, so a nearby main street beats a driveway; null = no Street View.
+ * Classes are the OpenMapTiles transportation layer of the OpenFreeMap base map.
+ */
+function streetPenalty(p) {
+  if (p.brunnel === "tunnel" || p.indoor === 1) return null;
+  if (p.class === "path") return p.subclass === "pedestrian" ? 4 : null;
+  if (p.class === "service") return p.service === "driveway" || p.service === "parking_aisle" ? 12 : 6;
+  return { motorway: 0, trunk: 0, primary: 0, secondary: 0, tertiary: 0, minor: 0, busway: 0, track: 15 }[p.class] ?? null;
+}
+
+/** Streets (with penalty) and buildings (with height) of the loaded base-map tiles within r metres of origin. */
+function surroundings(origin, r) {
+  const box = [-r, -r, r, r];
+  const streets = [];
+  for (const f of map.querySourceFeatures("openmaptiles", { sourceLayer: "transportation" })) {
+    const penalty = streetPenalty(f.properties);
+    if (penalty === null) continue;
+    for (const line of lines(f.geometry)) {
+      const m = line.map((c) => offsetM(origin, c));
+      if (overlaps(bboxOf(m), box)) streets.push({ penalty, line: m });
+    }
   }
-  return best;
+  const walls = [];
+  for (const f of map.querySourceFeatures("openmaptiles", { sourceLayer: "building" })) {
+    for (const ring of rings(f.geometry)) {
+      const m = ring.map((c) => offsetM(origin, c));
+      const bbox = bboxOf(m);
+      if (overlaps(bbox, box)) walls.push({ ring: m, bbox, height: f.properties.render_height ?? 10 });
+    }
+  }
+  return { streets, walls };
+}
+
+/** Building height in metres from its tags: height, else levels × 3 m. */
+const heightOf = (p) => (parseFloat(p.height) > 0 ? parseFloat(p.height) : p.levels * 3);
+
+/** Building f as a sight target in metres around origin: outline, centre, facade samples and its obstacles. */
+function sightTarget(f, origin, walls) {
+  const ring = outline(f).map((c) => offsetM(origin, c));
+  const centre = offsetM(origin, centroid(f));
+  const perimeter = ring.slice(1).reduce((s, v, i) => s + Math.hypot(v[0] - ring[i][0], v[1] - ring[i][1]), 0);
+  const samples = ring.length === 1 ? [ring[0]] : [...along(ring, Math.max(2, perimeter / 48))].slice(0, -1); // closed: last = first
+  // The base map has this building too (and the whole building when f is a part of it): not obstacles.
+  const obstacles = walls.filter((w) => !inRing(centre, w.ring) && !inRing(mean(w.ring), ring));
+  // Aim the line of sight at the lower facade (where the material is), not at a spire or roof top.
+  return { ring, centre, samples, obstacles, sight: Math.min(Math.max(CAMERA_M + 1, 0.5 * heightOf(f.properties)), 10) };
+}
+
+/** The facade samples a camera at p can see: not round the back of the building, not behind a taller one. */
+function seenFrom(p, target) {
+  const seen = [];
+  for (const q of target.samples) {
+    const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
+    if (len < 1) continue;
+    const k = (len - 0.75) / len; // stop just short of the facade itself
+    const e = [p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k];
+    if (firstCrossing(p, e, target.ring) !== null) continue;
+    const box = bboxOf([p, e]);
+    const blocked = target.obstacles.some((w) => {
+      if (!overlaps(w.bbox, box)) return false;
+      const t = firstCrossing(p, e, w.ring);
+      // The line of sight climbs from the camera to the facade, so a lower building in front lets it pass.
+      return t !== null && w.height > CAMERA_M + (target.sight - CAMERA_M) * t * k;
+    });
+    if (!blocked) seen.push(q);
+  }
+  return seen;
+}
+
+/** From p: heading to the middle of the seen facade, the angle it spans, and the distance to its far end. */
+function aim(p, seen, centre) {
+  const base = bearingM(p, centre);
+  const rel = seen.map((q) => ((bearingM(p, q) - base + 540) % 360) - 180);
+  const [lo, hi] = [Math.min(...rel), Math.max(...rel)];
+  const reach = Math.max(...seen.map((q) => Math.hypot(q[0] - p[0], q[1] - p[1])));
+  return { heading: (base + (lo + hi) / 2 + 360) % 360, span: hi - lo, reach };
+}
+
+/** The first of the buildings fs (nearest first) a camera at p, in metres around origin, sees: { f, view } or null. */
+function firstSeen(p, fs, origin, walls) {
+  for (const f of fs) {
+    const target = sightTarget(f, origin, walls);
+    if (inRing(p, target.ring)) continue; // a street mapped through the building: no meaningful view
+    const seen = seenFrom(p, target);
+    if (seen.length) return { f, view: aim(p, seen, target.centre) };
+  }
+  return null;
+}
+
+/** The best spot on a street within SV_VIEWPOINT_M to look at building f from, or null if none sees it. */
+function viewpointFor(f) {
+  const origin = centroid(f);
+  const size = Math.max(...outline(f).map((c) => distM(origin, c)));
+  const { streets, walls } = surroundings(origin, size + SV_VIEWPOINT_M + 30);
+  const target = sightTarget(f, origin, walls);
+  let best = null;
+  for (const { penalty, line } of streets) {
+    for (const p of along(line, 5)) {
+      const d = ringDist(p, target.ring);
+      if (d > SV_VIEWPOINT_M || inRing(p, target.ring)) continue;
+      const seen = seenFrom(p, target);
+      if (!seen.length) continue;
+      const view = aim(p, seen, target.centre);
+      // Fill most of the view, see much of the building, do not stand against its wall, prefer main streets.
+      const score = Math.min(view.span, 70) - Math.max(0, view.span - 100) / 2 + (20 * seen.length) / target.samples.length - 4 * Math.max(0, 6 - d) - penalty;
+      if (!best || score > best.score) best = { score, p, view };
+    }
+  }
+  return best && { pos: fromOffset(origin, ...best.p), ...best.view };
+}
+
+/** Resolves once the base-map tiles in view are loaded: the street search reads its streets and buildings. */
+const tilesLoaded = () => (map.areTilesLoaded() ? Promise.resolve() : new Promise((resolve) => map.once("idle", resolve)));
+
+/** A street click: stand on the nearest street and look at the nearest selected building seen from there. */
+async function streetClick(click) {
+  if (map.getZoom() < SV_MIN_ZOOM) return mapHint(T.svZoom);
+  const seq = ++svSeq;
+  await tilesLoaded();
+  if (seq !== svSeq) return;
+  const { streets, walls } = surroundings(click, SV_SNAP_M + SV_RANGE_M + 30);
+  let street = null;
+  for (const { penalty, line } of streets) {
+    for (let i = 1; i < line.length; i++) {
+      const [x, y, d] = closestOnSegment(line[i - 1], line[i]);
+      if (d <= SV_SNAP_M && (!street || d + penalty < street.score)) street = { score: d + penalty, p: [x, y] };
+    }
+  }
+  if (!street) return mapHint(T.svNoStreet(SV_SNAP_M));
+  const pos = fromOffset(click, ...street.p);
+  const near = chunksIn(around(pos, SV_RANGE_M));
+  await Promise.allSettled(near.map(loadChunk));
+  if (seq !== svSeq) return;
+  const candidates = [];
+  for (const c of near) {
+    for (const f of c.features ?? []) {
+      if (f.geometry.type === "Point" || !inSelection(f.properties) || distM(pos, centroid(f)) > SV_RANGE_M + 100) continue;
+      const d = ringDist(street.p, outline(f).map((v) => offsetM(click, v)));
+      if (d <= SV_RANGE_M) candidates.push([d, f]);
+    }
+  }
+  candidates.sort((a, b) => a[0] - b[0]);
+  const hit = firstSeen(street.p, candidates.slice(0, 12).map(([, f]) => f), click, walls);
+  if (hit) return showStreetView(pos, hit.f, hit.view, { from: click });
+  mapHint(candidates.length ? T.svHidden : T.svNoBuilding(SV_RANGE_M));
+}
+
+/** "Show in street view" on a building: bring it into view if needed, then stand where it is best seen. */
+async function viewBuilding(f) {
+  const seq = ++svSeq;
+  // The search reads the base-map tiles in view: zoom in, and centre a building near the edge.
+  const { x, y } = map.project(centroid(f));
+  const { clientWidth: w, clientHeight: h } = map.getContainer();
+  if (map.getZoom() < SV_MIN_ZOOM || x < 100 || y < 100 || x > w - 100 || y > h - 100) {
+    map.easeTo({ center: centroid(f), zoom: Math.max(map.getZoom(), 17), duration: reducedMotion ? 0 : 700 });
+    await new Promise((resolve) => map.once("idle", resolve));
+  }
+  await tilesLoaded();
+  if (seq !== svSeq) return;
+  const view = viewpointFor(f);
+  if (!view) return mapHint(T.svNoViewpoint(SV_VIEWPOINT_M));
+  showStreetView(view.pos, f, view);
+}
+
+/** With a street view open, a clicked building is looked at from the same spot, if it can be seen from there. */
+function reaim(f) {
+  if (f.geometry.type === "Point" || distM(sv.pos, centroid(f)) > SV_RANGE_M + 100) return;
+  svSeq += 1;
+  const hit = firstSeen([0, 0], [f], sv.pos, surroundings(sv.pos, SV_RANGE_M + 130).walls);
+  if (!hit) return mapHint(T.svNotFromHere);
+  showStreetView(sv.pos, f, hit.view, { moved: sv.moved });
 }
 
 function closeStreetView() {
+  svSeq += 1;
   sv.pos = sv.target = null;
+  cancelAnimationFrame(drawCamera.raf);
+  clearTimeout(drawCamera.timer);
   $("sv").hidden = true;
   $("svFrame").removeAttribute("src");
   $("stage").classList.remove("split");
@@ -611,35 +983,74 @@ function closeStreetView() {
   map.resize();
 }
 
-/** Opens (or re-aims) the street view at pos, looking at the target building, and draws the view cone. */
-function showStreetView(pos, target) {
-  const moved = sv.pos !== pos || sv.target !== target;
-  Object.assign(sv, { pos, target });
-  const aim = centroid(target);
-  const heading = bearing(pos, aim);
-  const p = target.properties;
+/** Title, note and link of the street-view pane; called again when the language changes. */
+function svHeader() {
+  const p = sv.target.properties;
   const material = p[`n:${state.key}`];
   $("svTitle").textContent = [p.name ?? typeLabel(p.type), material && label(material)].filter(Boolean).join(" · ");
-  $("svNote").textContent = T.svNote(nf.format(distM(pos, aim)));
-  $("svLink").href = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${pos[1]},${pos[0]}&heading=${heading.toFixed(0)}`;
-  if (!moved) return; // only the language changed
-  // Google's keyless embed; it snaps to the nearest panorama, so the real camera can be a few metres off.
+  $("svNote").textContent = T.svNote(nf.format(sv.dist), sv.moved >= 3 ? nf.format(sv.moved) : null);
+  $("svLink").href = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${sv.pos[1].toFixed(6)},${sv.pos[0].toFixed(6)}&heading=${sv.heading.toFixed(0)}`;
+}
+
+/**
+ * Opens (or re-aims) the street view at pos with the given heading at target. With from (the clicked point),
+ * the camera slides from there to pos on the map, so a camera moved to the street is seen moving there;
+ * moved is how far it was moved (shown in the note).
+ */
+function showStreetView(pos, target, { heading, reach }, { from = null, moved = from ? distM(from, pos) : 0 } = {}) {
+  const dist = ringDist([0, 0], outline(target).map((c) => offsetM(pos, c)));
+  Object.assign(sv, { pos, target, heading, dist, moved });
+  svHeader();
   $("svFrame").src = `https://www.google.com/maps?layer=c&cbll=${pos[1]},${pos[0]}&cbp=11,${heading.toFixed(1)},0,0,0&output=svembed`;
-  const reach = Math.min(Math.max(distM(pos, aim) * 1.15, 30), SV_RANGE_M * 1.5);
-  const arc = Array.from({ length: 13 }, (_, i) => destination(pos, heading - SV_FOV / 2 + (i * SV_FOV) / 12, reach));
-  map.getSource("cone").setData({
-    type: "FeatureCollection",
-    features: [
-      { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [[pos, ...arc, pos]] } },
-      { type: "Feature", properties: {}, geometry: { type: "Point", coordinates: pos } },
-    ],
-  });
-  map.setFilter("target", ["==", ["get", "osm_id"], p.osm_id]);
-  const opening = $("sv").hidden;
+  map.setFilter("target", ["==", ["get", "osm_id"], target.properties.osm_id]);
   $("sv").hidden = false;
   $("stage").classList.add("split");
   map.resize();
-  if (opening) map.fitBounds(new maplibregl.LngLatBounds(pos, pos).extend(aim), { padding: 120, maxZoom: Math.max(map.getZoom(), 17.5), duration: 600 });
+  drawCamera(pos, heading, Math.min(Math.max(reach * 1.1, 25), SV_RANGE_M * 1.5), from && distM(from, pos) > 1.5 ? from : null);
+  showPoints([pos, centroid(target), ...(from ? [from] : [])]);
+}
+
+/** View cone and camera at pos; with from, animates the camera there and briefly marks the clicked point. */
+function drawCamera(pos, heading, reach, from) {
+  cancelAnimationFrame(drawCamera.raf);
+  clearTimeout(drawCamera.timer);
+  const draw = (at, mark) => {
+    const arc = Array.from({ length: 13 }, (_, i) => destination(at, heading - SV_FOV / 2 + (i * SV_FOV) / 12, reach));
+    const features = [
+      { type: "Feature", properties: { kind: "cone" }, geometry: { type: "Polygon", coordinates: [[at, ...arc, at]] } },
+      { type: "Feature", properties: { kind: "camera" }, geometry: { type: "Point", coordinates: at } },
+    ];
+    if (mark) {
+      features.push(
+        { type: "Feature", properties: { kind: "snap" }, geometry: { type: "LineString", coordinates: [mark, at] } },
+        { type: "Feature", properties: { kind: "click" }, geometry: { type: "Point", coordinates: mark } },
+      );
+    }
+    map.getSource("cone").setData({ type: "FeatureCollection", features });
+  };
+  if (!from) return draw(pos, null);
+  const t0 = performance.now();
+  const frame = (now) => {
+    const k = reducedMotion ? 1 : Math.min((now - t0) / SNAP_MS, 1);
+    const e = 1 - (1 - k) ** 3;
+    draw([from[0] + (pos[0] - from[0]) * e, from[1] + (pos[1] - from[1]) * e], from);
+    if (k < 1) drawCamera.raf = requestAnimationFrame(frame);
+    else drawCamera.timer = setTimeout(() => draw(pos, null), 2000);
+  };
+  frame(t0);
+}
+
+/** Moves the map only if one of the points is outside the visible area (or too close to its edge). */
+function showPoints(points) {
+  const { clientWidth: w, clientHeight: h } = map.getContainer();
+  const pad = Math.min(80, w / 5, h / 5);
+  const inside = points.every((p) => {
+    const { x, y } = map.project(p);
+    return x > pad && y > pad && x < w - pad && y < h - pad;
+  });
+  if (inside) return;
+  const b = points.reduce((acc, p) => acc.extend(p), new maplibregl.LngLatBounds(points[0], points[0]));
+  map.fitBounds(b, { padding: pad, maxZoom: Math.max(map.getZoom(), 17.5), duration: reducedMotion ? 0 : 600 });
 }
 $("svClose").onclick = closeStreetView;
 
@@ -671,10 +1082,20 @@ handle.onkeydown = (e) => {
   setSplit(splitNow() + step);
 };
 
+/** The map hint: a passing message, else "loading", else the usage hint. */
+function paintHint() {
+  const el = $("maphint");
+  el.textContent = mapHint.text ?? (loadingChunks ? T.loading : T.svHint);
+  el.classList.toggle("alert", Boolean(mapHint.text));
+}
 function mapHint(text) {
-  $("maphint").textContent = text;
+  mapHint.text = text;
+  paintHint();
   clearTimeout(mapHint.timer);
-  mapHint.timer = setTimeout(() => ($("maphint").textContent = T.svHint), 5000);
+  mapHint.timer = setTimeout(() => {
+    mapHint.text = null;
+    paintHint();
+  }, 6000);
 }
 
 function initMap() {
@@ -682,20 +1103,16 @@ function initMap() {
     container: "map",
     style: `https://tiles.openfreemap.org/styles/${dark ? "dark" : "positron"}`,
     bounds: [-5, 42, 25, 71.3],
+    hash: "map", // #map=zoom/lat/lon keeps the view in the URL, so a view can be shared
   });
+  const sharedView = location.hash.includes("map=");
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
   map.on("error", (e) => {
     if (!mapReady) $("maplegend").textContent = `${T.noMap} ${e.error?.message ?? ""}`;
   });
   map.once("style.load", () => {
-    map.addSource("buildings", { type: "geojson", data: { type: "FeatureCollection", features: ALL } });
-    map.addSource("centroids", {
-      type: "geojson",
-      data: {
-        type: "FeatureCollection",
-        features: ALL.map((f) => ({ type: "Feature", properties: f.properties, geometry: { type: "Point", coordinates: centroid(f) } })),
-      },
-    });
+    map.addSource("buildings", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+    map.addSource("centroids", { type: "geojson", data: { type: "FeatureCollection", features: centroidFeatures() } });
     const surface = css("--surface");
     map.addLayer({
       id: "dots", type: "circle", source: "centroids", maxzoom: 14,
@@ -710,41 +1127,52 @@ function initMap() {
     map.addLayer({ id: "fill", type: "fill", source: "buildings", minzoom: 12, paint: { "fill-opacity": 0.85 } });
     map.addLayer({ id: "outline", type: "line", source: "buildings", minzoom: 12, paint: { "line-color": surface, "line-width": 1 } });
     const ink = css("--ink");
+    const kind = (k) => ["==", ["get", "kind"], k];
     map.addSource("cone", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
     map.addLayer({ id: "target", type: "line", source: "buildings", filter: ["==", ["get", "osm_id"], ""], paint: { "line-color": ink, "line-width": 3 } });
-    map.addLayer({ id: "cone-fill", type: "fill", source: "cone", filter: ["==", ["geometry-type"], "Polygon"], paint: { "fill-color": ink, "fill-opacity": 0.18 } });
-    map.addLayer({ id: "cone-line", type: "line", source: "cone", filter: ["==", ["geometry-type"], "Polygon"], paint: { "line-color": ink, "line-width": 1.5 } });
+    map.addLayer({ id: "snap", type: "line", source: "cone", filter: kind("snap"), paint: { "line-color": ink, "line-width": 1.5, "line-dasharray": [2, 2] } });
     map.addLayer({
-      id: "camera", type: "circle", source: "cone", filter: ["==", ["geometry-type"], "Point"],
+      id: "click", type: "circle", source: "cone", filter: kind("click"),
+      paint: { "circle-radius": 5, "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": ink, "circle-stroke-width": 1.5 },
+    });
+    map.addLayer({ id: "cone-fill", type: "fill", source: "cone", filter: kind("cone"), paint: { "fill-color": ink, "fill-opacity": 0.18 } });
+    map.addLayer({ id: "cone-line", type: "line", source: "cone", filter: kind("cone"), paint: { "line-color": ink, "line-width": 1.5 } });
+    map.addLayer({
+      id: "camera", type: "circle", source: "cone", filter: kind("camera"),
       paint: { "circle-radius": 6, "circle-color": ink, "circle-stroke-color": surface, "circle-stroke-width": 2 },
     });
-    // One handler for all layers, so a building hit by a dot and its polygon opens one popup.
-    // A building opens its popup (and re-aims an open street view); a street opens the street view.
+    // One handler for all layers. A building opens its popup (and re-aims an open street view);
+    // a dot zooms in to its building; a street places the street-view camera there.
     map.on("click", (e) => {
-      const pos = e.lngLat.toArray();
-      const hit = map.queryRenderedFeatures(e.point, { layers: ["fill", "dots"] })[0];
-      if (hit) {
-        new maplibregl.Popup({ maxWidth: "280px" }).setLngLat(e.lngLat).setHTML(popupHtml(hit.properties)).addTo(map);
-        const target = sv.pos && ALL.find((f) => f.properties.osm_id === hit.properties.osm_id);
-        if (target && target.geometry.type !== "Point") showStreetView(sv.pos, target);
-      } else if (map.getZoom() >= 14) {
-        const target = nearestBuilding(pos);
-        if (target) showStreetView(pos, target);
-        else mapHint(T.svNone(SV_RANGE_M));
-      }
+      const hit = map.queryRenderedFeatures(e.point, { layers: ["fill"] })[0];
+      if (hit) return buildingClick(hit.properties, e.lngLat);
+      const dot = map.queryRenderedFeatures(e.point, { layers: ["dots"] })[0];
+      if (dot) return map.flyTo({ center: dot.geometry.coordinates, zoom: 17, duration: reducedMotion ? 0 : 1600 });
+      streetClick(e.lngLat.toArray());
     });
     for (const layer of ["dots", "fill"]) {
       map.on("mouseenter", layer, () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", layer, () => (map.getCanvas().style.cursor = ""));
     }
+    map.on("moveend", syncChunks);
     mapReady = true;
     updateMap();
-    fitCountry();
+    if (!sharedView) fitCountry();
   });
 }
 
+function buildingClick(p, lngLat) {
+  const popup = new maplibregl.Popup({ maxWidth: "280px" }).setLngLat(lngLat).setHTML(popupHtml(p)).addTo(map);
+  const f = byId.get(p.osm_id);
+  popup.getElement().querySelector(".svbtn").onclick = () => {
+    popup.remove();
+    if (f) viewBuilding(f);
+  };
+  if (sv.pos && f) reaim(f);
+}
+
 setLang(state.lang);
-if (!Object.keys(DATA).length) {
+if (!WEB || !window.OSM_POINTS) {
   $("side").innerHTML = `<div id="missing">${T.noData}</div>`;
 } else {
   render();
